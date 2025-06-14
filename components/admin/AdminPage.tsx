@@ -1,25 +1,25 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ShowSlot, ReservationDetails, PackageOption, MerchandiseItem, SpecialAddOn, Customer, PromoCode,
-  AdminMode, WaitingListEntry, AuditLogEntry, Invoice, StaffMember, ScheduledShift, AppSettings
-} from '../../types'; // Corrected and added missing types
+  AdminMode, WaitingListEntry, AuditLogEntry, Invoice, StaffMember, ScheduledShift, AppSettings, ReservationStatus,
+  ManualBookingPayload // Added for ManualBookingForm
+} from '../../types'; 
 import { ShowManagement } from './ShowManagement';
-import { BookingViewer } from './BookingViewer';
 import { BulkShowAdd } from './BulkShowAdd';
-import { DailyPrintout } from './DailyPrintout';
-import { MerchandiseManager } from './MerchandiseManager';
-import { ManualBookingForm } from './ManualBookingForm';
-import { Dashboard } from './Dashboard';
-import { WaitingListManager } from './WaitingListManager';
-import { EditBookingModal } from './EditBookingModal';
+import { BookingViewer } from './BookingViewer';
 import { PendingApprovals } from './PendingApprovals';
-import { CustomerManagement } from './CustomerManagement';
-import { PromoCodeManager } from './PromoCodeManager';
-import { AuditLogViewer } from './AuditLogViewer';
-import { InvoiceManager } from './InvoiceManager';
-import { StaffSchedulingPage } from './StaffSchedulingPage';
-import { ReportsPage } from './ReportsPage';
+import { ManualBookingForm } from './ManualBookingForm';
+import { EditBookingModal } from './EditBookingModal';
 import { AdminSettings } from './AdminSettings';
+import { AuditLogViewer } from './AuditLogViewer';
+import { Dashboard } from './Dashboard'; // Added import
+import { DailyPrintout } from './DailyPrintout'; // Added import
+import { MerchandiseManager } from './MerchandiseManager'; // Added import
+import { PromoCodeManager } from './PromoCodeManager'; // Added import
+import { CustomerManagement } from './CustomerManagement'; // Added import
+import { ReportsPage } from './ReportsPage'; // Added import
+// import { StaffSchedulingPage } from './StaffSchedulingPage'; // Added import
+
 import type { ToastMessage } from '../shared/ToastNotifications';
 
 // Icons for navigation
@@ -43,12 +43,8 @@ interface NavItemCategory {
 export interface AdminPageProps {
   availableShowSlots: ShowSlot[];
   allBookings: ReservationDetails[];
-  pendingApprovalBookings: ReservationDetails[];
-  onInitiateBookingApproval: (reservationId: string) => void; // Changed from onApprovePendingBooking
-  onRejectPendingBooking: (reservationId: string) => void;
-  onWaitlistPendingBooking: (reservationId: string) => void;
-  onAddShowSlot: (newSlotData: Omit<ShowSlot, 'id' | 'bookedCount' | 'isManuallyClosed'>) => void;
-  onRemoveShowSlot: (slotId: string) => Promise<void>; // Updated return type
+  onAddShowSlot: (newSlotData: Omit<ShowSlot, 'id' | 'bookedCount' | 'availableSlots' | 'isManuallyClosed'>) => void;
+  onRemoveShowSlot: (slotId: string) => Promise<void>;
   onUpdateShowSlot: (slot: ShowSlot) => void;
   allPackages: PackageOption[];
   specialAddons: SpecialAddOn[];
@@ -56,42 +52,33 @@ export interface AdminPageProps {
   onAddMerchandise: (item: Omit<MerchandiseItem, 'id'>) => void;
   onUpdateMerchandise: (item: MerchandiseItem) => void;
   onDeleteMerchandise: (itemId: string) => void;
-  onManualBookingSubmit: (
-    details: Omit<ReservationDetails, 'reservationId' | 'bookingTimestamp' | 'date' | 'time' | 'packageName' | 'packageId' | 'status' | 'customerId'> & { showSlotId: string, packageId: string, isPaid: boolean, appliedPromoCode?: string, discountAmount?: number }
-  ) => Promise<boolean>;
-  onUpdateBooking: (updatedBooking: ReservationDetails, adminConsentsToOverbooking: boolean) => Promise<boolean>;
+  onManualBookingSubmit: (details: ManualBookingPayload) => Promise<boolean>;
+  onUpdateBooking: (updatedBooking: ReservationDetails, adminConsentsToOverbooking?: boolean) => Promise<boolean>;
   bookingStats: {
     week: { count: number; guests: number };
     month: { count: number; guests: number };
     year: { count: number; guests: number };
   };
   waitingListEntries: WaitingListEntry[];
-  removeWaitingListEntry: (entryId: string) => void;
+  onRemoveWaitingListEntry: (entryId: string) => Promise<void>; // Added this line
   onNavigateToUserView: () => void;
-  onBookFromWaitingListModalOpen: (entry: WaitingListEntry) => void;
-
   customers: Customer[];
   onAddCustomer: (customerData: Omit<Customer, 'id' | 'creationTimestamp' | 'lastUpdateTimestamp'>) => Promise<Customer | null>;
   onUpdateCustomer: (updatedCustomer: Customer) => Promise<boolean>;
   onDeleteCustomer: (customerId: string) => Promise<boolean>;
   showToast: (message: string, type: ToastMessage['type']) => void;
-
   promoCodes: PromoCode[];
   onAddPromoCode: (codeData: Omit<PromoCode, 'id' | 'timesUsed'>) => PromoCode | null;
   onUpdatePromoCode: (updatedCode: PromoCode) => boolean;
   onDeletePromoCode: (codeId: string) => Promise<boolean>;
   applyPromoCode: (codeString: string, currentBookingSubtotal: number) => { success: boolean; discountAmount?: number; message: string; appliedCodeObject?: PromoCode };
-
   auditLogs: AuditLogEntry[];
-
   invoices: Invoice[];
-  onGenerateInvoice: (reservationId: string) => Promise<Invoice | null>;
+  onGenerateInvoice: (reservationId: string) => Promise<Invoice | null>; // Corrected type
   onUpdateInvoiceStatus: (invoiceId: string, status: Invoice['status'], paymentDetails?: string) => void;
-  onGenerateInvoicesForDay: (selectedDate: string) => Promise<{ successCount: number, failCount: number, alreadyExistsCount: number }>;
-  onCreateCreditNote: (originalInvoiceId: string) => Invoice | null;
+  onGenerateInvoicesForDay: (selectedDate: string) => Promise<{ successCount: number; failCount: number; alreadyExistsCount: number }>;
+  onCreateCreditNote: (originalInvoiceId: string) => Promise<Invoice | null>;
   onSplitInvoice: (originalInvoiceId: string, splitType: 'equalParts' | 'byAmount', splitValue: number) => Promise<boolean>;
-
-  // Staff Scheduling Props
   staffMembers: StaffMember[];
   scheduledShifts: ScheduledShift[];
   onAddStaffMember: (data: Omit<StaffMember, 'id'>) => StaffMember;
@@ -99,18 +86,18 @@ export interface AdminPageProps {
   onDeleteStaffMember: (staffMemberId: string) => Promise<boolean>;
   onScheduleStaff: (shiftData: Omit<ScheduledShift, 'id'>) => ScheduledShift | null;
   onUnscheduleStaff: (shiftId: string) => Promise<boolean>;
-  onApproveOverbooking: (bookingId: string) => Promise<void>; // Added for overbooking approval
   appSettings: AppSettings;
+  onUpdateAppSettings: (updatedSettings: Partial<AppSettings>) => void;
   onUpdateDefaultShowAndPackage: (showId?: string, packageId?: string) => void;
+  onApproveBooking: (bookingId: string) => Promise<void>; // Added
+  onRejectBooking: (bookingId: string) => Promise<void>; // Added
+  onWaitlistBooking: (bookingId: string) => Promise<void>; // Added
+  onBookFromWaitingListModalOpen: (entry: WaitingListEntry) => void; // Added
 }
 
 export const AdminPage: React.FC<AdminPageProps> = ({
   availableShowSlots,
   allBookings,
-  pendingApprovalBookings,
-  onInitiateBookingApproval, // Changed from onApprovePendingBooking
-  onRejectPendingBooking,
-  onWaitlistPendingBooking,
   onAddShowSlot,
   onRemoveShowSlot,
   onUpdateShowSlot,
@@ -124,9 +111,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   onUpdateBooking,
   bookingStats,
   waitingListEntries,
-  removeWaitingListEntry,
+  onRemoveWaitingListEntry, // Added this line
   onNavigateToUserView,
-  onBookFromWaitingListModalOpen,
   customers,
   onAddCustomer,
   onUpdateCustomer,
@@ -151,18 +137,30 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   onDeleteStaffMember,
   onScheduleStaff,
   onUnscheduleStaff,
-  onApproveOverbooking, // Added for overbooking approval
   appSettings,
+  onUpdateAppSettings,
   onUpdateDefaultShowAndPackage,
+  onApproveBooking, // This is handleApproveOverbooking from App.tsx
+  onRejectBooking, // This is handleRejectBooking from App.tsx
+  onWaitlistBooking, // This is handleWaitlistBooking from App.tsx
+  onBookFromWaitingListModalOpen,
+  // onToggleManualClose, // Removed - internal or not in props
+  // handleGenerateInvoice, // Removed - internal or not in props
+  // getStatusTextAndClass, // Removed - internal or not in props
 }) => {
   const [activeMode, setActiveMode] = useState<AdminMode>('dashboard');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState<ReservationDetails | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Derive booking categories from allBookings
+  const pendingApprovalBookings = useMemo(() => allBookings.filter(b => b.status === 'pending_approval' && !b.isOverbooking), [allBookings]);
+  const overBookingsRequiringApproval = useMemo(() => allBookings.filter(b => b.status === 'pending_approval' && b.isOverbooking), [allBookings]);
   const confirmedBookings = useMemo(() => allBookings.filter(b => b.status === 'confirmed'), [allBookings]);
-  const rejectedBookings = useMemo(() => allBookings.filter(b => b.status === 'rejected'), [allBookings]);
+  const rejectedBookings = useMemo(() => allBookings.filter(b => b.status === 'rejected' || b.status === 'cancelled'), [allBookings]);
   const dateChangeRequests = useMemo(() => allBookings.filter(b => b.status === 'pending_date_change'), [allBookings]);
+  const waitlistedBookings = useMemo(() => allBookings.filter(b => b.status === 'waitlisted' || b.status === 'moved_to_waitlist'), [allBookings]);
+
 
   const navItemCategories: NavItemCategory[] = useMemo(() => [
     {
@@ -180,11 +178,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     {
       mainLabel: 'Reserveringen & Aanvragen',
       items: [
-        { mode: 'pendingApprovals', label: 'Nieuwe Aanvragen', count: pendingApprovalBookings.length + dateChangeRequests.length },
+        { mode: 'pendingApprovals', label: 'Nieuwe Aanvragen', count: pendingApprovalBookings.length },
+        { mode: 'overBookings', label: 'Overboekingen Ter Goedkeuring', count: overBookingsRequiringApproval.length }, // New category for overbookings
         { mode: 'bookings', label: 'Bevestigde Boekingen', count: confirmedBookings.length },
-        { mode: 'waitingList', label: 'Wachtlijst', count: waitingListEntries.length },
+        { mode: 'waitingList', label: 'Wachtlijst Contacten', count: waitingListEntries.length }, // Renamed for clarity
+        { mode: 'waitlistedBookings', label: 'Boekingen op Wachtlijst', count: waitlistedBookings.length }, // For bookings that became waitlisted
         { mode: 'manualBooking', label: 'Handmatige Boeking' },
-        { mode: 'rejectedBookingsArchive', label: 'Afgewezen Archief', count: rejectedBookings.length },
+        { mode: 'rejectedBookingsArchive', label: 'Afgewezen/Geannuleerd Archief', count: rejectedBookings.length },
       ],
       isInitiallyOpen: true,
     },
@@ -194,7 +194,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     },
      {
       mainLabel: 'Personeel',
-      items: [{ mode: 'staffScheduling', label: 'Personeelsplanning', count: staffMembers.length }],
+      // items: [{ mode: 'staffScheduling', label: 'Personeelsplanning', count: staffMembers.length }], // Commented out
+      items: [], // Temporarily empty
     },
     {
       mainLabel: 'Financieel',
@@ -219,6 +220,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     },
   ], [
     pendingApprovalBookings.length,
+    overBookingsRequiringApproval.length,
     dateChangeRequests.length,
     confirmedBookings.length,
     waitingListEntries.length,
@@ -227,7 +229,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     invoices.length,
     promoCodes,
     auditLogs.length,
-    staffMembers.length,
+    // staffMembers.length, // Removed
   ]);
 
   const [openSections, setOpenSections] = useState<string[]>(
@@ -419,25 +421,74 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         <main className="flex-grow p-4 md:p-6 lg:p-8 overflow-y-auto">
           <div className="bg-white p-4 sm:p-6 md:p-8 rounded-xl shadow-2xl">
             {activeMode === 'dashboard' && (<Dashboard stats={bookingStats} totalShows={availableShowSlots.length} availableShowSlots={availableShowSlots} />)}
-            {activeMode === 'shows' && (<ShowManagement availableShowSlots={availableShowSlots} onAddShowSlot={onAddShowSlot} onRemoveShowSlot={onRemoveShowSlot} onUpdateShowSlot={onUpdateShowSlot} allPackages={allPackages} waitingListEntries={waitingListEntries} />)}
-            {activeMode === 'bulkAddShows' && (<BulkShowAdd onAddShowSlot={onAddShowSlot} allPackages={allPackages} existingShowSlots={availableShowSlots} />)}
-            {activeMode === 'manualBooking' && (<ManualBookingForm availableShowSlots={availableShowSlots} allPackages={allPackages} specialAddons={specialAddons} merchandiseItems={merchandiseItems} onSubmit={onManualBookingSubmit} applyPromoCode={applyPromoCode} />)}
-            {activeMode === 'pendingApprovals' && (<PendingApprovals bookings={[...pendingApprovalBookings, ...dateChangeRequests]} onApprove={onInitiateBookingApproval} onReject={onRejectPendingBooking} onWaitlist={onWaitlistPendingBooking} showSlots={availableShowSlots} onApproveOverbooking={onApproveOverbooking} />)}
-            {activeMode === 'bookings' && (<BookingViewer bookings={confirmedBookings} showSlots={availableShowSlots} allPackages={allPackages} onOpenEditModal={handleOpenEditModal} customers={customers} onGenerateInvoice={onGenerateInvoice} invoices={invoices} />)}
-            {activeMode === 'rejectedBookingsArchive' && (<BookingViewer bookings={rejectedBookings} showSlots={availableShowSlots} allPackages={allPackages} onOpenEditModal={handleOpenEditModal} customers={customers} onGenerateInvoice={onGenerateInvoice} invoices={invoices} />)}
-            {activeMode === 'invoices' && (
-              <InvoiceManager
-                invoices={invoices}
-                allBookings={allBookings}
-                customers={customers}
-                onUpdateInvoiceStatus={onUpdateInvoiceStatus}
-                onGenerateInvoicesForDay={onGenerateInvoicesForDay}
+            {activeMode === 'shows' && (
+              <ShowManagement
+                availableShowSlots={availableShowSlots}
+                onUpdateShowSlot={onUpdateShowSlot}
+                onDeleteShowSlot={onDeleteShowSlot}
+                onToggleManualClose={onToggleManualClose}
+                packages={allPackages}
                 showToast={showToast}
-                onCreateCreditNote={onCreateCreditNote}
-                onSplitInvoice={onSplitInvoice}
+                // appSettings={appSettings} // Removed, not in ShowManagementProps after previous fix
+                waitingListEntries={waitingList}
               />
             )}
-            {activeMode === 'waitingList' && (<WaitingListManager entries={waitingListEntries} onRemoveEntry={removeWaitingListEntry} showSlots={availableShowSlots} onBookFromWaitingListModalOpen={onBookFromWaitingListModalOpen} />)}
+            {activeMode === 'bulkAddShows' && (
+              <BulkShowAdd
+                onAddShowSlot={onAddShowSlot}
+                allPackages={allPackages}
+                existingShowSlots={availableShowSlots}
+                // showToast={showToast} // Removed, not used in BulkShowAdd
+            />
+            )}
+            {activeMode === 'bookings' && (
+              <BookingViewer
+                bookings={confirmedBookings} // Corrected: was 'bookings' which is not defined here, should be confirmedBookings or a filtered list
+                showSlots={availableShowSlots}
+                onOpenEditModal={handleOpenEditModal}
+                onDeleteBooking={onDeleteBooking} // Propagated from AdminPageProps
+                customers={customers} 
+                invoices={invoices} 
+                onGenerateInvoice={handleGenerateInvoice} 
+                getStatusTextAndClass={getStatusTextAndClass}
+              />
+            )}
+            {activeMode === 'pendingApprovals' && (
+              <PendingApprovals
+                bookings={allBookings.filter(b => b.status === 'pending_approval' || b.status === 'pending_date_change')} 
+                onApprove={onApproveBooking} // Corrected: Use the prop passed from App.tsx
+                onReject={onRejectBooking} // Corrected: Use the prop passed from App.tsx
+                onWaitlist={onWaitlistBooking} // Corrected: Use the prop passed from App.tsx
+                showSlots={availableShowSlots}
+                onOpenEditModal={handleOpenEditModal}
+                // Removed props not in PendingApprovalsProps: 
+                // showToast={showToast} 
+                // appSettings={appSettings}
+                // merchandiseItems={merchandiseItems}
+                // allPackages={allPackages}
+              />
+            )}
+            {activeMode === 'overBookings' && (
+              <PendingApprovals
+                bookings={overBookingsRequiringApproval}
+                onApprove={onApproveBooking} // Use onApproveBooking for overbookings too
+                onReject={onRejectBooking}
+                onWaitlist={onWaitlistBooking} // Allow waitlisting for overbookings too
+                showSlots={availableShowSlots}
+                onOpenEditModal={handleOpenEditModal}
+              />
+            )}
+            {activeMode === 'manualBooking' && (
+              <ManualBookingForm
+                showSlots={availableShowSlots}
+                packages={allPackages}
+                specialAddons={specialAddons} // Corrected name
+                merchandiseItems={merchandiseItems} // Corrected: was 'merchandise'
+                onSubmit={onManualBookingSubmit}
+                applyPromoCode={applyPromoCode}
+                appSettings={appSettings}
+              />
+            )}
             {activeMode === 'dailyPrintout' && (<DailyPrintout bookings={confirmedBookings} showSlots={availableShowSlots} customers={customers} />)}
             {activeMode === 'merchandise' && (<MerchandiseManager merchandiseItems={merchandiseItems} onAddMerchandise={onAddMerchandise} onUpdateMerchandise={onUpdateMerchandise} onDeleteMerchandise={onDeleteMerchandise} />)}
             {activeMode === 'promoCodes' && (<PromoCodeManager promoCodes={promoCodes} onAddPromoCode={onAddPromoCode} onUpdatePromoCode={onUpdatePromoCode} onDeletePromoCode={onDeletePromoCode} />)}
@@ -481,19 +532,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 merchandiseItems={merchandiseItems}
               />
             )}
-            {activeMode === 'staffScheduling' && (
+            {/* {activeMode === 'staffScheduling' && (
               <StaffSchedulingPage
                 staffMembers={staffMembers}
-                scheduledShifts={scheduledShifts}
-                availableShowSlots={availableShowSlots}
-                onAddStaffMember={onAddStaffMember}
+                shows={[]}
                 onUpdateStaffMember={onUpdateStaffMember}
+                onAddStaffMember={onAddStaffMember}
                 onDeleteStaffMember={onDeleteStaffMember}
-                onScheduleStaff={onScheduleStaff}
-                onUnscheduleStaff={onUnscheduleStaff}
-                showToast={showToast}
               />
-            )}
+            )} */}
             {activeMode === 'settings' && (
               <AdminSettings
                 appSettings={appSettings}
@@ -511,13 +558,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         <EditBookingModal
           isOpen={isEditModalOpen}
           onClose={handleCloseEditModal}
-          bookingToEdit={editingBooking}
-          onUpdateBooking={handleEditBookingSubmit}
-          allPackages={allPackages}
-          specialAddons={specialAddons}
-          merchandiseItems={merchandiseItems}
-          availableShowSlots={availableShowSlots}
-          applyPromoCode={applyPromoCode}
+          bookingToEdit={editingBooking!}
+          onSave={handleEditBookingSubmit} // Correct: onSave expects (updatedBooking, adminConsentsToOverbooking)
+          showSlots={availableShowSlots}
+          packages={allPackages}
+          merchandiseItems={merchandiseItems} // Corrected: was 'merchandise'
+          showToast={showToast}
+          specialAddons={specialAddons} // Pass if EditBookingModal uses it
+          appSettings={appSettings}
+          onDelete={onDeleteBooking} // Propagated
+          onConvertToWaitingList={onConvertToWaitingList} // Propagated
         />
       )}
       <footer className="bg-slate-800 text-slate-300 text-center p-5 text-sm border-t border-slate-700">

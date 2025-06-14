@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShowSlot, PackageOption, MerchandiseItem, OrderedMerchandiseItem, BookingData, ReservationDetails, Address, InvoiceDetails, ReservationStatus, SpecialAddOn, PromoCode, Customer } from '../../types';
+import { ShowSlot, PackageOption, MerchandiseItem, OrderedMerchandiseItem, BookingData, ReservationDetails, Address, InvoiceDetails, ReservationStatus, SpecialAddOn, PromoCode, Customer, AppSettings } from '../../types'; // Added AppSettings
 import { CalendarView } from '../CalendarView';
 
 const CloseIconSvg = () => (
@@ -12,15 +12,17 @@ interface BookingStepperProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (details: Omit<ReservationDetails, 'reservationId' | 'bookingTimestamp' | 'date' | 'time' | 'packageName'>) => Promise<{ success: boolean; status: ReservationStatus }>;
-  allPackages: PackageOption[];
+  showPackages: PackageOption[]; // Changed from allPackages to showPackages
   specialAddons: SpecialAddOn[];
   availableShowSlots: ShowSlot[];
   merchandiseItems: MerchandiseItem[];
+  promoCodes: PromoCode[]; // Added promoCodes
+  appSettings: AppSettings; // Added appSettings
   initialData?: Partial<BookingData>;
   onOpenWaitingListModal: (slotId: string) => void;
   applyPromoCode: (codeString: string, currentBookingSubtotal: number) => { success: boolean; discountAmount?: number; message: string; appliedCodeObject?: PromoCode };
   loggedInCustomer: Customer | null;
-  onLogout: () => void;
+  onLogout?: () => void; // Made optional
   showInfoModal: (title: string, message: React.ReactNode, status?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
@@ -37,10 +39,12 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
   isOpen,
   onClose,
   onSubmit,
-  allPackages,
+  showPackages, // Changed from allPackages
   specialAddons,
   availableShowSlots,
   merchandiseItems,
+  promoCodes,
+  appSettings,
   initialData,
   onOpenWaitingListModal,
   applyPromoCode,
@@ -68,10 +72,11 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
   const [dietaryWishes, setDietaryWishes] = useState('');
   const [placementPreferenceDetails, setPlacementPreferenceDetails] = useState('');
   const [invoiceDetails, setInvoiceDetails] = useState<InvoiceDetails>({
-    needsInvoice: false,
+    generateInvoice: false, // Changed from needsInvoice
+    sendInvoice: false, // Added default for sendInvoice
     companyName: '',
     vatNumber: '',
-    invoiceAddress: undefined,
+    address: undefined, // Changed from invoiceAddress to address
     remarks: ''
   });
   const [promoCodeInput, setPromoCodeInput] = useState('');
@@ -104,10 +109,11 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
       setDietaryWishes('');
       setPlacementPreferenceDetails('');
       setInvoiceDetails({
-        needsInvoice: false,
+        generateInvoice: false, // Changed from needsInvoice
+        sendInvoice: false, // Added default for sendInvoice
         companyName: '',
         vatNumber: '',
-        invoiceAddress: undefined,
+        address: undefined, // Changed from invoiceAddress to address
         remarks: ''
       });
       setPromoCodeInput('');
@@ -145,7 +151,7 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
         if (selectedVoorborrel && voorborrelAddon?.minPersons && guests < voorborrelAddon.minPersons) {
           newErrors.voorborrel = `Borrel vooraf vereist minimaal ${voorborrelAddon.minPersons} gasten.`;
         }
-        if (invoiceDetails.needsInvoice && !invoiceDetails.companyName?.trim()) {
+        if (invoiceDetails.generateInvoice && !invoiceDetails.companyName?.trim()) { // Changed from needsInvoice
           newErrors.companyName = 'Bedrijfsnaam is verplicht voor factuur.';
         }
         break;
@@ -310,8 +316,8 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
   };
 
   const calculateSubtotal = (): number => {
-    const selectedPackage = allPackages.find(p => p.id === selectedPackageId);
-    const packagePrice = selectedPackage ? selectedPackage.price * guests : 0;
+    const selectedPackage = showPackages.find(p => p.id === selectedPackageId); // Changed from allPackages
+    const packagePrice = selectedPackage?.price ? selectedPackage.price * guests : 0; // Safe access to price
     
     let addOnPrice = 0;
     if (selectedVoorborrel) {
@@ -461,8 +467,8 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                   </div>
                 )}
                 <div className="grid gap-4">
-                  {allPackages
-                    .filter(pkg => !selectedShowSlot || selectedShowSlot.availablePackageIds.includes(pkg.id))
+                  {showPackages // Changed from allPackages
+                    .filter(pkg => !selectedShowSlot || (selectedShowSlot.availablePackageIds && selectedShowSlot.availablePackageIds.includes(pkg.id)))
                     .map(pkg => (
                     <div 
                       key={pkg.id}
@@ -513,7 +519,7 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                         </div>
                         <div className="text-right ml-4">
                           <p className={`text-xl font-bold ${pkg.colorCode ? 'text-white' : 'text-indigo-600'}`}>
-                            €{pkg.price}
+                            €{pkg.price !== undefined ? pkg.price : 'N/A'} {/* Safe access to price */}
                           </p>
                           <p className={`text-sm ${pkg.colorCode ? 'text-gray-200' : 'text-gray-500'}`}>
                             per persoon
@@ -580,8 +586,8 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                     <input
                       type="checkbox"
                       id="needs-invoice"
-                      checked={invoiceDetails.needsInvoice}
-                      onChange={(e) => setInvoiceDetails(prev => ({ ...prev, needsInvoice: e.target.checked }))}
+                      checked={invoiceDetails.generateInvoice} // Changed from needsInvoice
+                      onChange={(e) => setInvoiceDetails(prev => ({ ...prev, generateInvoice: e.target.checked }))} // Changed from needsInvoice
                       className="mr-2"
                     />
                     <label htmlFor="needs-invoice" className="text-sm text-gray-700">
@@ -589,7 +595,7 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                     </label>
                   </div>
 
-                  {invoiceDetails.needsInvoice && (
+                  {invoiceDetails.generateInvoice && ( // Changed from needsInvoice
                     <div className="space-y-3 pl-6 bg-gray-50 p-4 rounded-lg">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -916,7 +922,7 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                 </div>
 
                 {/* Additional Details */}
-                {(celebrationDetails || dietaryWishes || placementPreferenceDetails || invoiceDetails.needsInvoice) && (
+                {(celebrationDetails || dietaryWishes || placementPreferenceDetails || invoiceDetails.generateInvoice) && (
                   <div className="bg-yellow-50 p-4 rounded-lg mb-4">
                     <h5 className="font-medium mb-2">Aanvullende informatie:</h5>
                     {celebrationDetails && (
@@ -934,7 +940,7 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                         <span className="font-medium">Plaatsingsvoorkeur:</span> {placementPreferenceDetails}
                       </div>
                     )}
-                    {invoiceDetails.needsInvoice && (
+                    {invoiceDetails.generateInvoice && ( // Changed from needsInvoice
                       <div className="text-sm">
                         <span className="font-medium">Factuur:</span> Ja, voor {invoiceDetails.companyName}
                       </div>
@@ -974,7 +980,7 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                 {selectedPackageId && (
                   <div className="flex justify-between">
                     <span>Arrangement:</span>
-                    <span className="font-medium">{allPackages.find(p => p.id === selectedPackageId)?.name}</span>
+                    <span className="font-medium">{showPackages.find(p => p.id === selectedPackageId)?.name}</span> {/* Changed from allPackages */}
                   </div>
                 )}
                 <div className="flex justify-between">
@@ -984,7 +990,7 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                 {selectedPackageId && (
                   <div className="flex justify-between">
                     <span>Arrangementsprijs:</span>
-                    <span>€{((allPackages.find(p => p.id === selectedPackageId)?.price || 0) * guests).toFixed(2)}</span>
+                    <span>€{((showPackages.find(p => p.id === selectedPackageId)?.price || 0) * guests).toFixed(2)}</span> {/* Changed from allPackages and safe access*/}
                   </div>
                 )}
                 

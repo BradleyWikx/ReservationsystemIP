@@ -9,9 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/moment": "^2.11.29",
+    "@types/react-big-calendar": "^1.16.2",
     "@types/react-toastify": "^4.0.2",
+    "autoprefixer": "^10.4.21",
     "firebase": "^11.9.1",
+    "moment": "^2.30.1",
     "react": "^19.1.0",
+    "react-big-calendar": "^1.19.3",
     "react-dom": "^19.1.0",
     "react-firebase-hooks": "^5.1.1",
     "react-toastify": "^11.0.5"

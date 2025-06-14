@@ -1,16 +1,23 @@
-
 import React from 'react';
 import { ReservationDetails, ShowSlot, ReservationStatus } from '../../types';
 
 interface PendingApprovalsProps {
-  bookings: ReservationDetails[]; // This will now include both pending_approval and pending_date_change
+  bookings: ReservationDetails[]; 
   onApprove: (reservationId: string) => void; 
   onReject: (reservationId: string) => void;
-  onWaitlist: (reservationId: string) => void;
+  onWaitlist: (reservationId: string) => void; 
   showSlots: ShowSlot[];
+  onOpenEditModal: (booking: ReservationDetails) => void; 
 }
 
-export const PendingApprovals: React.FC<PendingApprovalsProps> = ({ bookings, onApprove, onReject, onWaitlist, showSlots }) => {
+export const PendingApprovals: React.FC<PendingApprovalsProps> = ({ 
+  bookings, 
+  onApprove, 
+  onReject, 
+  onWaitlist, 
+  showSlots, 
+  onOpenEditModal, 
+}) => {
 
   const sortedBookings = [...bookings]
     .filter(b => b.status === 'pending_approval' || b.status === 'pending_date_change') // Explicitly filter
@@ -51,6 +58,12 @@ export const PendingApprovals: React.FC<PendingApprovalsProps> = ({ bookings, on
                     {booking.status === 'pending_date_change' && booking.userModificationRequest && (
                         <p className={`text-xs text-${statusInfo.color}-700 mt-1`}>Klantverzoek: <em>"{booking.userModificationRequest}"</em></p>
                     )}
+                     <button 
+                        onClick={() => onOpenEditModal(booking)} 
+                        className="mt-1 text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium py-1 px-2 rounded-md transition-colors"
+                      >
+                        Details / Bewerken
+                      </button>
                   </div>
                   <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-2 mt-2 sm:mt-0">
                     {booking.status === 'pending_approval' && (

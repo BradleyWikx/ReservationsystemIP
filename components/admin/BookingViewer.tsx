@@ -1,31 +1,42 @@
-
 import React, { useState, useMemo } from 'react';
-import { ReservationDetails, ShowSlot, PackageOption, Customer, Invoice, ReservationStatus } from '../../types';
+import { ReservationDetails, ShowSlot, Customer, Invoice, AppSettings } from '../../types'; // Removed PackageOption, MerchandiseItem. Added Customer, Invoice.
 import { CalendarView } from '../CalendarView';
+
+// Helper function (can be moved to utils if used elsewhere)
+const getStatusTextAndClass = (status: ReservationDetails['status']) => {
+  switch (status) {
+    case 'confirmed': return { text: 'Bevestigd', className: 'bg-green-100 border-green-300 text-green-700' };
+    case 'pending_approval': return { text: 'Wacht op goedkeuring', className: 'bg-yellow-100 border-yellow-300 text-yellow-700' };
+    case 'waitlisted': return { text: 'Wachtlijst', className: 'bg-blue-100 border-blue-300 text-blue-700' };
+    case 'cancelled': return { text: 'Geannuleerd', className: 'bg-red-100 border-red-300 text-red-700' };
+    case 'completed': return { text: 'Voltooid', className: 'bg-gray-100 border-gray-300 text-gray-700' };
+    case 'pending_payment': return { text: 'Wacht op betaling', className: 'bg-orange-100 border-orange-300 text-orange-700' };
+    case 'pending_date_change': return { text: 'Datumwijziging aangevraagd', className: 'bg-purple-100 border-purple-300 text-purple-700' };
+    default: return { text: status.toUpperCase(), className: 'bg-gray-100 border-gray-300 text-gray-500' };
+  }
+};
 
 interface BookingViewerProps {
   bookings: ReservationDetails[];
   showSlots: ShowSlot[];
-  allPackages: PackageOption[];
+  customers: Customer[]; // Added customers
+  invoices: Invoice[]; // Added invoices
+  appSettings?: AppSettings; // Added appSettings (optional for now)
   onOpenEditModal: (booking: ReservationDetails) => void;
-  customers: Customer[];
-  onGenerateInvoice: (reservationId: string) => Promise<Invoice | null>;
-  invoices: Invoice[];
+  onDeleteBooking?: (reservationId: string) => Promise<void>; // Made optional as not used in current display logic
+  onGenerateInvoice?: (reservationId: string) => Promise<string | null>; // Added, returns invoiceId or null
 }
 
-const getStatusTextAndClass = (status: ReservationStatus): { text: string; className: string } => {
-    switch (status) {
-      case 'confirmed': return { text: 'Bevestigd', className: 'bg-green-200 text-green-700 border-green-300' };
-      case 'pending_approval': return { text: 'Wacht Goedkeuring', className: 'bg-yellow-200 text-yellow-700 border-yellow-300' };
-      case 'waitlisted': return { text: 'Wachtlijst', className: 'bg-blue-200 text-blue-700 border-blue-300' };
-      case 'rejected': return { text: 'Afgewezen/Geannuleerd', className: 'bg-red-200 text-red-700 border-red-300' };
-      case 'moved_to_waitlist': return { text: 'Verplaatst (Wachtlijst)', className: 'bg-gray-200 text-gray-700 border-gray-300' };
-      case 'pending_date_change': return { text: 'Datumwijziging Aanvraag', className: 'bg-purple-200 text-purple-700 border-purple-300' };
-      default: return { text: status, className: 'bg-gray-200 text-gray-700 border-gray-300' };
-    }
-};
-
-export const BookingViewer: React.FC<BookingViewerProps> = ({ bookings, showSlots, allPackages, onOpenEditModal, customers, onGenerateInvoice, invoices }) => {
+export const BookingViewer: React.FC<BookingViewerProps> = ({ 
+  bookings, 
+  showSlots, 
+  customers, // Added
+  invoices, // Added
+  // appSettings, // Added, but not used yet
+  onOpenEditModal,
+  // onDeleteBooking, // Optional, not used here
+  onGenerateInvoice, // Added
+ }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
 
@@ -94,9 +105,10 @@ export const BookingViewer: React.FC<BookingViewerProps> = ({ bookings, showSlot
             const emailMatch = booking.email.toLowerCase().includes(searchTermLower);
             const reservationIdMatch = booking.reservationId.toLowerCase().includes(searchTermLower);
             const invoiceIdMatch = booking.invoiceId?.toLowerCase().includes(searchTermLower);
-            const invoiceNumberMatch = invoices.find(inv => inv.id === booking.invoiceId)?.invoiceNumber.toLowerCase().includes(searchTermLower);
+            const existingInvoice = booking.invoiceId ? invoices.find(inv => inv.id === booking.invoiceId) : null;
+            const invoiceNumberMatch = existingInvoice?.invoiceNumber?.toLowerCase().includes(searchTermLower);
             const statusMatch = getStatusTextAndClass(booking.status).text.toLowerCase().includes(searchTermLower);
-            return nameMatch || emailMatch || reservationIdMatch || invoiceIdMatch || invoiceNumberMatch || statusMatch;
+            return nameMatch || emailMatch || reservationIdMatch || invoiceIdMatch || !!invoiceNumberMatch || statusMatch; // Ensure invoiceNumberMatch is boolean
         });
         if(searchedBookings.length > 0) {
             filteredGroups[time] = searchedBookings;
@@ -184,6 +196,7 @@ export const BookingViewer: React.FC<BookingViewerProps> = ({ bookings, showSlot
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${statusInfo.className}`}>
                           {statusInfo.text}
                         </span>
+                        {/* Removed onUpdateBookingStatus call from here, should be handled by onOpenEditModal or specific buttons if needed */}
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${booking.isPaid ? 'bg-green-200 text-green-700' : 'bg-red-200 text-red-700'}`}>
                           {booking.isPaid ? 'BETAALD' : 'NIET BETAALD'}
                         </span>
@@ -196,7 +209,7 @@ export const BookingViewer: React.FC<BookingViewerProps> = ({ bookings, showSlot
                                 Bekijk Factuur
                             </button>
                         ) : (
-                            booking.status === 'confirmed' &&
+                            booking.status === 'confirmed' && onGenerateInvoice && // Check if onGenerateInvoice is provided
                             <button
                                 onClick={() => onGenerateInvoice(booking.reservationId)}
                                 className="text-[10px] bg-teal-500 hover:bg-teal-600 text-white font-medium py-1 px-2 rounded-md transition-colors"
@@ -205,8 +218,8 @@ export const BookingViewer: React.FC<BookingViewerProps> = ({ bookings, showSlot
                             </button>
                         )}
                         <button
-                          onClick={() => onOpenEditModal(booking)}
-                          className="text-[10px] bg-yellow-400 hover:bg-yellow-500 text-yellow-800 font-medium py-1 px-2 rounded-md transition-colors"
+                          onClick={() => onOpenEditModal(booking)} // Corrected: use onOpenEditModal
+                          className="text-[10px] bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-1 px-2 rounded-md transition-colors"
                         >
                           Bewerk
                         </button>
@@ -238,7 +251,7 @@ export const BookingViewer: React.FC<BookingViewerProps> = ({ bookings, showSlot
                           <ul className="list-disc list-inside ml-2">{booking.merchandise.map(item => (<li key={item.itemId}>{item.quantity}x {item.itemName}</li>))}</ul>
                         </div>
                       )}
-                       {booking.invoiceDetails?.needsInvoice && (
+                       {booking.invoiceDetails?.generateInvoice && (
                         <div className="lg:col-span-full text-gray-500 italic">
                             Factuur nodig: {booking.invoiceDetails.companyName || 'Ja'} {booking.invoiceDetails.vatNumber && `(VAT: ${booking.invoiceDetails.vatNumber})`}
                         </div>

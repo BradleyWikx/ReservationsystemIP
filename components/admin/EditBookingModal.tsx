@@ -1,539 +1,481 @@
-
-
-
-
-
-import React, { useState, useEffect, useRef } from 'react';
-import { ReservationDetails, PackageOption, MerchandiseItem, OrderedMerchandiseItem, ShowSlot, Address, InvoiceDetails, SpecialAddOn, PromoCode } from '../../types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { ReservationDetails, PackageOption, MerchandiseItem, ShowSlot, Address, InvoiceDetails, AppSettings } from '../../types'; // Removed SpecialAddOn, PromoCode as they are not directly used or handled by props
+import { Timestamp } from 'firebase/firestore';
+import { calculatePrice } from '../../utils/pricingUtils'; // Corrected import: calculatePrice
 
 interface EditBookingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  bookingToEdit: ReservationDetails;
-  onUpdateBooking: (updatedBooking: ReservationDetails, adminConsentsToOverbooking: boolean) => Promise<boolean>; 
-  allPackages: PackageOption[];
-  specialAddons: SpecialAddOn[]; 
+  booking: ReservationDetails | null;
+  onSave: (updatedBooking: ReservationDetails) => void;
+  packages: PackageOption[];
   merchandiseItems: MerchandiseItem[];
-  availableShowSlots: ShowSlot[];
-  applyPromoCode: (codeString: string, currentBookingSubtotal: number) => { success: boolean; discountAmount?: number; message: string; appliedCodeObject?: PromoCode };
+  showSlots: ShowSlot[];
+  appSettings?: AppSettings; // Make appSettings optional as it's not used everywhere yet
 }
 
-const CloseIconSvg = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-  </svg>
-);
+const initialAddressState: Address = { street: '', houseNumber: '', postalCode: '', city: '', zipCode: '', country: '' };
+const initialInvoiceDetailsState: InvoiceDetails = { generateInvoice: false, sendInvoice: false, address: { ...initialAddressState } };
+
+const getInitialFormData = (booking: ReservationDetails | null): Partial<ReservationDetails> => {
+  if (!booking) return { 
+    guests: 1, 
+    merchandise: [], 
+    specialRequests: '', 
+    internalNotes: '', // Added
+    paymentDetails: { method: '', transactionId: '', amount: 0, status: 'pending' }, 
+    invoiceDetails: { ...initialInvoiceDetailsState },
+    address: { ...initialAddressState },
+    agreedToPrivacyPolicy: true, // Default for existing bookings being edited
+    totalPrice: 0,
+    appliedPromoCode: '', // Added
+    discountAmount: 0, // Added
+  };
+
+  return {
+    ...booking,
+    address: booking.address ? { ...booking.address } : { ...initialAddressState },
+    invoiceDetails: booking.invoiceDetails ? { ...booking.invoiceDetails, address: booking.invoiceDetails.address ? { ...booking.invoiceDetails.address } : { ...initialAddressState } } : { ...initialInvoiceDetailsState },
+    merchandise: booking.merchandise ? [...booking.merchandise] : [],
+    specialRequests: booking.specialRequests || '', // Added
+    internalNotes: booking.internalNotes || '', // Added
+    appliedPromoCode: booking.appliedPromoCode || '', // Added
+    discountAmount: booking.discountAmount || 0, // Added
+  };
+};
+
 
 export const EditBookingModal: React.FC<EditBookingModalProps> = ({
   isOpen,
   onClose,
-  bookingToEdit,
-  onUpdateBooking,
-  allPackages,
-  specialAddons,
+  booking,
+  onSave,
+  packages,
   merchandiseItems,
-  availableShowSlots,
-  applyPromoCode, 
+  showSlots,
+  // appSettings, // Not directly used in this simplified version yet
 }) => {
-  if (!isOpen) return null;
-
-  const [formData, setFormData] = useState<ReservationDetails>({ 
-    ...bookingToEdit,
-    isPaid: bookingToEdit.isPaid || false,
-    isMPL: bookingToEdit.isMPL || false,
-    placementPreferenceDetails: bookingToEdit.placementPreferenceDetails || '',
-    internalAdminNotes: bookingToEdit.internalAdminNotes || '',
-    selectedVoorborrel: bookingToEdit.selectedVoorborrel || false,
-    selectedNaborrel: bookingToEdit.selectedNaborrel || false,
-    acceptsMarketingEmails: bookingToEdit.acceptsMarketingEmails || false,
-    agreedToPrivacyPolicy: bookingToEdit.agreedToPrivacyPolicy || true, // Admin implies agreement or it was set
-  });
+  const [formData, setFormData] = useState<Partial<ReservationDetails>>(getInitialFormData(booking));
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formMessage, setFormMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-  
-  const [isPotentialOverbooking, setIsPotentialOverbooking] = useState<boolean>(false);
-  const [adminConsentsToOverbooking, setAdminConsentsToOverbooking] = useState<boolean>(false);
-
-  const [promoCodeInput, setPromoCodeInput] = useState<string>(bookingToEdit.appliedPromoCode || '');
-  const [currentAppliedPromo, setCurrentAppliedPromo] = useState<string | undefined>(bookingToEdit.appliedPromoCode);
-  const [currentDiscountAmount, setCurrentDiscountAmount] = useState<number | undefined>(bookingToEdit.discountAmount);
-  const [promoCodeEditMessage, setPromoCodeEditMessage] = useState<{type: 'success' | 'error' | 'info', text: string} | null>(null);
-
+  const [calculatedPrice, setCalculatedPrice] = useState<number>(0);
 
   useEffect(() => {
-    setFormData({ 
-        ...bookingToEdit,
-        isPaid: bookingToEdit.isPaid || false, 
-        isMPL: bookingToEdit.isMPL || false,
-        placementPreferenceDetails: bookingToEdit.placementPreferenceDetails || '',
-        internalAdminNotes: bookingToEdit.internalAdminNotes || '',
-        selectedVoorborrel: bookingToEdit.selectedVoorborrel || false,
-        selectedNaborrel: bookingToEdit.selectedNaborrel || false,
-        merchandise: bookingToEdit.merchandise || [], 
-        address: bookingToEdit.address || { street: '', houseNumber: '', postalCode: '', city: '' },
-        invoiceDetails: bookingToEdit.invoiceDetails || { needsInvoice: false, companyName: '', vatNumber: '', invoiceAddress: { street: '', houseNumber: '', postalCode: '', city: '' }, remarks: ''},
-        acceptsMarketingEmails: bookingToEdit.acceptsMarketingEmails || false,
-        agreedToPrivacyPolicy: bookingToEdit.agreedToPrivacyPolicy || true, 
-    });
-    setPromoCodeInput(bookingToEdit.appliedPromoCode || '');
-    setCurrentAppliedPromo(bookingToEdit.appliedPromoCode);
-    setCurrentDiscountAmount(bookingToEdit.discountAmount);
-    setPromoCodeEditMessage(null);
-    
-    setErrors({});
-    setFormMessage(null);
-    setAdminConsentsToOverbooking(false);
-    if(isOpen) modalRef.current?.focus();
-  }, [isOpen, bookingToEdit]);
+    setFormData(getInitialFormData(booking));
+  }, [booking]);
 
-  useEffect(() => {
-    const currentShowSlot = availableShowSlots.find(s => s.id === formData.showSlotId);
-    if (currentShowSlot) {
-      const oldBookingSlot = availableShowSlots.find(s => s.id === bookingToEdit.showSlotId);
-      const guestChangeOnSameSlot = (currentShowSlot.id === bookingToEdit.showSlotId) ? (formData.guests - bookingToEdit.guests) : formData.guests;
-      const newBookedCount = (oldBookingSlot?.id === currentShowSlot.id ? (currentShowSlot.bookedCount - bookingToEdit.guests) : currentShowSlot.bookedCount) + formData.guests;
-      setIsPotentialOverbooking(newBookedCount > currentShowSlot.capacity);
-    } else {
-      setIsPotentialOverbooking(false);
-    }
-  }, [formData.guests, formData.showSlotId, availableShowSlots, bookingToEdit.guests, bookingToEdit.showSlotId]);
-
-
-  useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    if (isOpen) document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
-
-  const resetPromoApplication = () => {
-    setPromoCodeInput(formData.appliedPromoCode || '');
-    setCurrentAppliedPromo(formData.appliedPromoCode);
-    setCurrentDiscountAmount(formData.discountAmount);
-    setPromoCodeEditMessage(null);
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target;
-    const checked = (e.target as HTMLInputElement).checked;
-    
-    setFormMessage(null);
-    setErrors(prev => ({...prev, [name]: undefined }));
-    resetPromoApplication();
-
-    if (name === "selectedVoorborrel" || name === "selectedNaborrel" || name === "isPaid" || name === "isMPL" || name === "acceptsMarketingEmails" || name === "agreedToPrivacyPolicy") {
-        setFormData(prev => ({ ...prev, [name]: checked }));
-    } else if (name === "guests") {
-        setFormData(prev => ({ ...prev, guests: parseInt(value, 10) || 1 }));
-    } else if (name === "showSlotId"){
-        const newSlotId = value;
-        const newSlot = availableShowSlots.find(s => s.id === newSlotId);
-        if (newSlot) {
-            setFormData(prev => ({
-                ...prev,
-                showSlotId: newSlotId,
-                date: newSlot.date,
-                time: newSlot.time,
-                // Reset package if not available in new slot
-                packageId: newSlot.availablePackageIds.includes(prev.packageId) ? prev.packageId : (newSlot.availablePackageIds[0] || '')
-            }));
-        }
-    } else {
-        const val = type === 'number' ? parseInt(value, 10) : (type === 'checkbox' ? checked : value);
-        setFormData(prev => ({ ...prev, [name]: val }));
-    }
-  };
-  
-  const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormMessage(null);
-    resetPromoApplication();
-    setErrors(prev => ({...prev, [name]: undefined, [`address.${name}`]: undefined }));
-    setFormData(prev => ({ ...prev, address: { ...prev.address!, [name as keyof Address]: value } }));
-  };
-
-  const handleInvoiceDetailsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value, type } = e.target;
-    const checked = (e.target as HTMLInputElement).checked;
-    setFormMessage(null);
-    resetPromoApplication();
-
-    const fieldNameForError = name.startsWith("invoiceDetails.") ? name : `invoiceDetails.${name}`;
-    setErrors(prev => ({...prev, [fieldNameForError]: undefined }));
-
-
-    if (name === "needsInvoice") {
-        setFormData(prev => ({ ...prev, invoiceDetails: { ...prev.invoiceDetails!, needsInvoice: checked } }));
-    } else if (name.startsWith("invoiceAddress.")) {
-        const field = name.split(".")[1] as keyof Address;
-        setErrors(prev => ({...prev, [`invoiceDetails.invoiceAddress.${field}`]: undefined }));
-        setFormData(prev => ({ ...prev, invoiceDetails: { ...prev.invoiceDetails!, invoiceAddress: { ...prev.invoiceDetails?.invoiceAddress!, [field]: value } } }));
-    } else {
-        setFormData(prev => ({ ...prev, invoiceDetails: { ...prev.invoiceDetails!, [name as keyof Omit<InvoiceDetails, 'needsInvoice'|'invoiceAddress'>]: value } }));
-    }
-  };
-
-  const handleMerchQuantityChange = (itemId: string, quantity: number) => {
-    const item = merchandiseItems.find(m => m.id === itemId);
-    if (!item) return;
-    setFormMessage(null);
-    resetPromoApplication();
-    setFormData(prev => {
-      const existingMerch = prev.merchandise || [];
-      const existing = existingMerch.find(oi => oi.itemId === itemId);
-      if (quantity > 0) {
-        if (existing) return { ...prev, merchandise: existingMerch.map(oi => oi.itemId === itemId ? { ...oi, quantity } : oi) };
-        return { ...prev, merchandise: [...existingMerch, { itemId, quantity, itemName: item.name, itemPrice: item.priceInclVAT }] };
-      }
-      return { ...prev, merchandise: existingMerch.filter(oi => oi.itemId !== itemId) };
-    });
-  };
-
-  const calculateSubtotal = () => {
-    let subtotal = 0;
-    const currentPackage = allPackages.find(p => p.id === formData.packageId);
-    if (currentPackage) subtotal += currentPackage.price * formData.guests;
-
-    if (formData.selectedVoorborrel) {
-        const voorborrelAddon = specialAddons.find(sa => sa.id === 'voorborrel');
-        if (voorborrelAddon) subtotal += voorborrelAddon.price * formData.guests;
-    }
-    if (formData.selectedNaborrel) {
-        const naborrelAddon = specialAddons.find(sa => sa.id === 'naborrel');
-        if (naborrelAddon) subtotal += naborrelAddon.price * formData.guests;
-    }
-    formData.merchandise?.forEach(item => subtotal += item.itemPrice * item.quantity);
-    return subtotal;
-  }
-
-  const handleApplyPromoCodeButton = () => {
-     if (!promoCodeInput.trim() && !currentAppliedPromo) { // No code entered, none applied
-        setPromoCodeEditMessage({ type: 'info', text: 'Geen code ingevoerd.' });
-        setCurrentDiscountAmount(undefined);
-        return;
-    }
-    if (!promoCodeInput.trim() && currentAppliedPromo) { // Clearing an applied code
-        setPromoCodeEditMessage({ type: 'success', text: `Code "${currentAppliedPromo}" verwijderd.` });
-        setCurrentAppliedPromo(undefined);
-        setCurrentDiscountAmount(undefined);
-        setPromoCodeInput(''); 
-        return;
-    }
-
-    const subtotal = calculateSubtotal();
-    const result = applyPromoCode(promoCodeInput, subtotal);
-    
-    setPromoCodeEditMessage({ type: result.success ? 'success' : 'error', text: result.message });
-
-    if (result.success && result.appliedCodeObject && result.discountAmount !== undefined) {
-      let finalDiscount = result.discountAmount;
-      if (result.appliedCodeObject.type === 'gift_card') {
-        finalDiscount = Math.min(result.discountAmount, subtotal);
-      } else {
-        finalDiscount = Math.min(result.discountAmount, subtotal);
-      }
-      setCurrentAppliedPromo(result.appliedCodeObject.code);
-      setCurrentDiscountAmount(finalDiscount);
-    } else {
-      // If applying failed, revert to the original applied code of the booking if any
-      setCurrentAppliedPromo(formData.appliedPromoCode);
-      setCurrentDiscountAmount(formData.discountAmount);
-    }
-  };
-  
-  const calculateTotalPrice = () => {
-    const subtotal = calculateSubtotal();
-    let total = subtotal;
-    if (currentAppliedPromo && currentDiscountAmount !== undefined) {
-      total -= currentDiscountAmount;
-    }
-    return Math.max(0, total).toFixed(2);
-  };
-
-  const groupedMerchandise = merchandiseItems.reduce((acc, item) => {
-    const category = item.category || 'Overig';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(item);
-    return acc;
-  }, {} as Record<string, MerchandiseItem[]>);
-
-  const validateForm = (): boolean => {
+  const validate = useCallback(() => {
     const newErrors: Record<string, string> = {};
-    if (!formData.showSlotId) newErrors.showSlotId = "Selecteer een show."; 
-    if (!formData.packageId) newErrors.packageId = "Selecteer een arrangement.";
-
-    if (formData.guests < 1) newErrors.guests = 'Aantal gasten moet minimaal 1 zijn.';
+    if (!formData.name?.trim()) newErrors.name = 'Naam is verplicht.';
+    if (!formData.email?.trim() || !/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Ongeldig e-mailadres.';
+    if (!formData.phone?.trim()) newErrors.phone = 'Telefoonnummer is verplicht.';
+    if (!formData.showSlotId) newErrors.showSlotId = 'Showslot is verplicht.';
+    if (!formData.packageId) newErrors.packageId = 'Pakket is verplicht.';
+    if (!formData.guests || formData.guests < 1) newErrors.guests = 'Aantal gasten moet minimaal 1 zijn.';
     
-    const currentPackage = allPackages.find(p => p.id === formData.packageId);
-    if (currentPackage?.minPersons && formData.guests < currentPackage.minPersons) {
-      newErrors.guests = `Minimaal ${currentPackage.minPersons} gasten vereist voor ${currentPackage.name}.`;
+    if (formData.invoiceDetails?.generateInvoice) {
+        if (!formData.invoiceDetails.address?.street?.trim()) newErrors['invoiceDetails.address.street'] = 'Straat (factuur) is verplicht.';
+        if (!formData.invoiceDetails.address?.houseNumber?.trim()) newErrors['invoiceDetails.address.houseNumber'] = 'Huisnummer (factuur) is verplicht.';
+        if (!formData.invoiceDetails.address?.postalCode?.trim()) newErrors['invoiceDetails.address.postalCode'] = 'Postcode (factuur) is verplicht.';
+        if (!formData.invoiceDetails.address?.city?.trim()) newErrors['invoiceDetails.address.city'] = 'Plaats (factuur) is verplicht.';
+        if (!formData.invoiceDetails.address?.zipCode) newErrors['invoiceDetails.address.zipCode'] = 'Postcode (factuur) is verplicht.';
+        if (!formData.invoiceDetails.address?.country) newErrors['invoiceDetails.address.country'] = 'Land (factuur) is verplicht.';
     }
-    
-    if (!formData.name.trim()) newErrors.name = 'Naam is verplicht.';
-    if (!formData.email.trim()) newErrors.email = 'E-mail is verplicht.';
-    else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Voer een geldig e-mailadres in.';
-    if (!formData.phone.trim()) newErrors.phone = 'Telefoonnummer is verplicht.';
-
-    if (!formData.address?.street?.trim()) newErrors.street = 'Straat is verplicht.';
-    if (!formData.address?.houseNumber?.trim()) newErrors.houseNumber = 'Huisnummer is verplicht.';
-    if (!formData.address?.postalCode?.trim()) newErrors.postalCode = 'Postcode is verplicht.';
-    if (!formData.address?.city?.trim()) newErrors.city = 'Plaats is verplicht.';
-
-    if (formData.invoiceDetails?.needsInvoice) {
-        if (!formData.invoiceDetails.companyName?.trim()) newErrors.companyName = 'Bedrijfsnaam (factuur) is verplicht.';
-        if (formData.invoiceDetails.invoiceAddress) {
-           if(!formData.invoiceDetails.invoiceAddress.street?.trim()) newErrors.invoiceStreet = 'Straat (factuur) is verplicht.';
-           if(!formData.invoiceDetails.invoiceAddress.houseNumber?.trim()) newErrors.invoiceHouseNumber = 'Huisnummer (factuur) is verplicht.';
-           if(!formData.invoiceDetails.invoiceAddress.postalCode?.trim()) newErrors.invoicePostalCode = 'Postcode (factuur) is verplicht.';
-           if(!formData.invoiceDetails.invoiceAddress.city?.trim()) newErrors.invoiceCity = 'Plaats (factuur) is verplicht.';
-        }
-    }
-    const voorborrelAddon = specialAddons.find(sa => sa.id === 'voorborrel');
-    if (formData.selectedVoorborrel && voorborrelAddon?.minPersons && formData.guests < voorborrelAddon.minPersons) {
-      newErrors.voorborrel = `Minimaal ${voorborrelAddon.minPersons} gasten vereist voor Borrel Vooraf.`;
+    // Basic address validation (optional, depending on requirements)
+    if (formData.address) {
+        if (formData.address.street && !formData.address.houseNumber) newErrors['address.houseNumber'] = 'Huisnummer is verplicht als straat is ingevuld.';
+        // Add more specific address validations if needed
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  };
+  }, [formData]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormMessage(null); 
-    if (validateForm()) {
-      // Use currentAppliedPromo and currentDiscountAmount for submission
-      const updatedBookingData = {
-        ...formData,
-        appliedPromoCode: currentAppliedPromo,
-        discountAmount: currentDiscountAmount,
-      };
-      const success = await onUpdateBooking(updatedBookingData, adminConsentsToOverbooking);
-      if (success) {
-        // Modal is closed from AdminPage if successful
-      } else {
-        setFormMessage({ type: 'error', text: 'Bijwerken mislukt. Controleer de details of probeer opnieuw.' });
-      }
+  useEffect(() => {
+    // Recalculate price when relevant fields change
+    const selectedPackage = packages.find(p => p.id === formData.packageId);
+    const selectedShowSlot = showSlots.find(s => s.id === formData.showSlotId); // Get selected show slot
+    
+    const currentPrice = calculatePrice({
+        selectedPackage,
+        selectedShowSlot, // Pass selectedShowSlot
+        guests: formData.guests || 0,
+        merchandise: formData.merchandise || [],
+        merchandiseItems: merchandiseItems, // Pass full merchandiseItems list
+        // vatRate: appSettings?.vatRates?.standard, // Example: pass VAT rate if available from appSettings
+    });
+    setCalculatedPrice(currentPrice);
+    setFormData(prev => ({ ...prev, totalPrice: currentPrice }));
+
+  }, [formData.packageId, formData.showSlotId, formData.guests, formData.merchandise, packages, merchandiseItems, formData.appliedPromoCode, formData.discountAmount]);
+
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target; // Keep 'type' if it was intended for other logic, otherwise remove
+    const typeAttribute = e.target.type;
+    const checked = (e.target as HTMLInputElement).checked;
+  
+    if (typeAttribute === 'checkbox') {
+      setFormData(prev => ({ ...prev, [name]: checked }));
+    } else if (typeAttribute === 'number') {
+      setFormData(prev => ({ ...prev, [name]: parseInt(value, 10) || 0 }));
     } else {
-        setFormMessage({ type: 'error', text: 'Vul alle verplichte velden correct in.' });
+      setFormData(prev => ({ ...prev, [name]: value }));
     }
   };
-  
-  const availableShowSlotsSorted = [...availableShowSlots].sort((a,b) => new Date(a.date + 'T' + a.time).getTime() - new Date(b.date + 'T' + b.time).getTime());
-  const packagesForSelectedSlot = formData.showSlotId ? allPackages.filter(p => availableShowSlots.find(s => s.id === formData.showSlotId)?.availablePackageIds.includes(p.id)) : [];
-  const voorborrelAddon = specialAddons.find(sa => sa.id === 'voorborrel');
-  const canSelectVoorborrel = voorborrelAddon && formData.guests >= (voorborrelAddon.minPersons || 0);
 
+  const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      address: {
+        ...(prev.address || initialAddressState),
+        [name]: value,
+      },
+    }));
+  };
+
+  const handleInvoiceAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      invoiceDetails: {
+        ...(prev.invoiceDetails || initialInvoiceDetailsState),
+        address: {
+          ...(prev.invoiceDetails?.address || initialAddressState),
+          [name]: value,
+        },
+      },
+    }));
+  };
+  
+  const handleInvoiceDetailsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value, type } = e.target;
+    const checked = (e.target as HTMLInputElement).checked;
+
+    if (name === 'generateInvoice' || name === 'sendInvoice') {
+        setFormData(prev => ({
+            ...prev,
+            invoiceDetails: {
+                ...(prev.invoiceDetails || initialInvoiceDetailsState),
+                [name]: checked,
+            }
+        }));
+    } else if (name.startsWith('address.')) { // Should not happen due to handleInvoiceAddressChange
+        // This case is handled by handleInvoiceAddressChange, but as a fallback:
+        const field = name.split('.')[1];
+        setFormData(prev => ({
+            ...prev,
+            invoiceDetails: {
+                ...(prev.invoiceDetails || initialInvoiceDetailsState),
+                address: {
+                    ...(prev.invoiceDetails?.address || initialAddressState),
+                    [field]: value,
+                }
+            }
+        }));
+    } else {
+         setFormData(prev => ({
+            ...prev,
+            invoiceDetails: {
+                ...(prev.invoiceDetails || initialInvoiceDetailsState),
+                [name]: value,
+            }
+        }));
+    }
+  };
+
+
+  const handleMerchandiseChange = (itemId: string, quantity: number) => {
+    const existingItem = formData.merchandise?.find(m => m.itemId === itemId);
+    const itemDetails = merchandiseItems.find(mi => mi.id === itemId);
+    if (!itemDetails) return;
+
+    let updatedMerchandise = [...(formData.merchandise || [])];
+
+    if (quantity <= 0) {
+      updatedMerchandise = updatedMerchandise.filter(m => m.itemId !== itemId);
+    } else {
+      if (existingItem) {
+        updatedMerchandise = updatedMerchandise.map(m =>
+          m.itemId === itemId ? { ...m, quantity, itemName: itemDetails.name, itemPrice: itemDetails.priceInclVAT } : m
+        );
+      } else {
+        updatedMerchandise.push({ itemId, quantity, itemName: itemDetails.name, itemPrice: itemDetails.priceInclVAT });
+      }
+    }
+    setFormData(prev => ({ ...prev, merchandise: updatedMerchandise }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    const submissionData: ReservationDetails = {
+      ...(booking as ReservationDetails), // Base with original booking to keep IDs etc.
+      ...(formData as Partial<ReservationDetails>), // Apply all changed fields
+      id: booking!.id, // Ensure original ID is preserved
+      reservationId: booking!.reservationId, // Ensure original reservationId is preserved
+      lastModifiedTimestamp: Timestamp.now().toDate().toISOString(),
+      totalPrice: calculatedPrice, // Use the dynamically calculated price
+      // Ensure all required fields from ReservationDetails are present
+      packageName: packages.find(p => p.id === formData.packageId)?.name || booking!.packageName,
+      date: showSlots.find(s => s.id === formData.showSlotId)?.date || booking!.date,
+      time: showSlots.find(s => s.id === formData.showSlotId)?.time || booking!.time,
+      status: formData.status || booking!.status, // Keep original status if not changed
+      bookingTimestamp: booking!.bookingTimestamp, // Preserve original booking timestamp
+      agreedToPrivacyPolicy: formData.agreedToPrivacyPolicy === undefined ? booking!.agreedToPrivacyPolicy : formData.agreedToPrivacyPolicy,
+    };
+    
+    onSave(submissionData);
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  const currentShowSlot = showSlots.find(s => s.id === formData.showSlotId);
+  // const selectedPackageDetails = packages.find(p => p.id === formData.packageId); // Declared but not used
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-[90] backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="edit-booking-modal-title" onClick={onClose}>
-      <div ref={modalRef} tabIndex={-1} className="bg-white p-5 md:p-8 rounded-lg shadow-2xl max-w-2xl w-full max-h-[95vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-200">
-          <h2 id="edit-booking-modal-title" className="text-xl md:text-2xl font-semibold text-blue-600">Reservering Bewerken</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 transition-colors" aria-label="Sluiten"><CloseIconSvg /></button>
-        </div>
-
-        {formMessage && (<p className={`p-3 rounded-md mb-4 text-sm ${formMessage.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{formMessage.text}</p>)}
-        
-        <form onSubmit={handleSubmit} noValidate className="flex-grow overflow-y-auto mb-6 pr-2 scrollbar space-y-4">
-          <p className="text-xs text-gray-500">Reservering ID: {bookingToEdit.reservationId}</p>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-auto">
+      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <h2 className="text-2xl font-semibold mb-6 text-slate-700">Boeking Bewerken: {booking?.reservationId}</h2>
+        <form onSubmit={handleSubmit} className="space-y-6">
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <label htmlFor="showSlotId_edit_modal" className="block text-sm font-medium text-gray-700">Show</label>
-                <select name="showSlotId" id="showSlotId_edit_modal" value={formData.showSlotId} onChange={handleInputChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500">
-                    {availableShowSlotsSorted.map(slot => <option key={slot.id} value={slot.id}>{new Date(slot.date + 'T00:00:00').toLocaleDateString('nl-NL')} om {slot.time} ({slot.bookedCount}/{slot.capacity})</option>)}
-                </select>
-                {errors.showSlotId && <p className="text-red-500 text-sm mt-1">{errors.showSlotId}</p>}
-            </div>
-            <div>
-                <label htmlFor="packageId_edit_modal" className="block text-sm font-medium text-gray-700">Arrangement</label>
-                <select name="packageId" id="packageId_edit_modal" value={formData.packageId} onChange={handleInputChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500" disabled={packagesForSelectedSlot.length === 0}>
-                    {packagesForSelectedSlot.map(pkg => <option key={pkg.id} value={pkg.id}>{pkg.name} - €{pkg.price.toFixed(2)}</option>)}
-                </select>
-                {errors.packageId && <p className="text-red-500 text-sm mt-1">{errors.packageId}</p>}
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="guests_edit_modal" className="block text-sm font-medium text-gray-700">Aantal Gasten</label>
-            <input type="number" name="guests" id="guests_edit_modal" value={formData.guests} onChange={handleInputChange} min="1" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500"/>
-            {errors.guests && <p className="text-red-500 text-sm mt-1">{errors.guests}</p>}
-          </div>
-          
-          {isPotentialOverbooking && (
-            <div className="my-3 p-3 border border-yellow-300 bg-yellow-50 rounded-md">
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={adminConsentsToOverbooking} 
-                  onChange={(e) => setAdminConsentsToOverbooking(e.target.checked)}
-                  className="form-checkbox h-4 w-4 text-yellow-600 border-yellow-400 rounded focus:ring-yellow-500"
-                />
-                <span className="text-sm font-medium text-yellow-700">Sta overboeking toe voor deze wijziging</span>
-              </label>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="name_edit_modal" className="block text-sm font-medium text-gray-700">Naam Contactpersoon</label>
-              <input type="text" name="name" id="name_edit_modal" value={formData.name} onChange={handleInputChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500"/>
-              {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name}</p>}
-            </div>
-            <div>
-              <label htmlFor="phone_edit_modal" className="block text-sm font-medium text-gray-700">Telefoon</label>
-              <input type="tel" name="phone" id="phone_edit_modal" value={formData.phone} onChange={handleInputChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500"/>
-              {errors.phone && <p className="text-red-500 text-sm mt-1">{errors.phone}</p>}
-            </div>
-          </div>
-          <div>
-            <label htmlFor="email_edit_modal" className="block text-sm font-medium text-gray-700">E-mail</label>
-            <input type="email" name="email" id="email_edit_modal" value={formData.email} onChange={handleInputChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500"/>
-            {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email}</p>}
-          </div>
-
-          <fieldset className="border border-gray-300 p-3 rounded-md">
-            <legend className="text-sm font-medium text-gray-700 px-1">Adresgegevens</legend>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
-                <div className="md:col-span-2"><label htmlFor="street_edit" className="block text-xs font-medium text-gray-600">Straat</label><input type="text" name="street" id="street_edit" value={formData.address?.street || ''} onChange={handleAddressChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.street && <p className="text-red-500 text-xs mt-0.5">{errors.street}</p>}</div>
-                <div><label htmlFor="houseNumber_edit" className="block text-xs font-medium text-gray-600">Huisnr.</label><input type="text" name="houseNumber" id="houseNumber_edit" value={formData.address?.houseNumber || ''} onChange={handleAddressChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.houseNumber && <p className="text-red-500 text-xs mt-0.5">{errors.houseNumber}</p>}</div>
-                <div><label htmlFor="postalCode_edit" className="block text-xs font-medium text-gray-600">Postcode</label><input type="text" name="postalCode" id="postalCode_edit" value={formData.address?.postalCode || ''} onChange={handleAddressChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.postalCode && <p className="text-red-500 text-xs mt-0.5">{errors.postalCode}</p>}</div>
-                <div className="md:col-span-2"><label htmlFor="city_edit" className="block text-xs font-medium text-gray-600">Plaats</label><input type="text" name="city" id="city_edit" value={formData.address?.city || ''} onChange={handleAddressChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.city && <p className="text-red-500 text-xs mt-0.5">{errors.city}</p>}</div>
+          {/* Customer Details */}
+          <fieldset className="border border-slate-300 p-4 rounded-lg shadow-sm">
+            <legend className="text-lg font-medium text-slate-600 px-2">Klantgegevens</legend>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="name" className="block text-sm font-medium text-slate-700 mb-1">Naam</label>
+                <input type="text" name="name" id="name" value={formData.name || ''} onChange={handleInputChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" />
+                {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
+              </div>
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
+                <input type="email" name="email" id="email" value={formData.email || ''} onChange={handleInputChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" />
+                {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+              </div>
+              <div>
+                <label htmlFor="phone" className="block text-sm font-medium text-slate-700 mb-1">Telefoon</label>
+                <input type="tel" name="phone" id="phone" value={formData.phone || ''} onChange={handleInputChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" />
+                {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
+              </div>
             </div>
           </fieldset>
 
-          <div className="mt-2"><label className="flex items-center space-x-2"><input type="checkbox" name="needsInvoice" checked={formData.invoiceDetails?.needsInvoice || false} onChange={handleInvoiceDetailsChange} className="form-checkbox h-4 w-4 text-blue-600 rounded"/><span className="text-sm text-gray-700">Factuurgegevens (indien afwijkend/bedrijf)</span></label></div>
-            {formData.invoiceDetails?.needsInvoice && (
-                 <fieldset className="border border-gray-300 p-3 rounded-md space-y-2">
-                    <legend className="text-sm font-medium text-gray-700 px-1">Factuurdetails</legend>
-                    <div><label htmlFor="companyName_edit" className="block text-xs font-medium text-gray-600">Bedrijfsnaam</label><input type="text" name="companyName" id="companyName_edit" value={formData.invoiceDetails?.companyName || ''} onChange={handleInvoiceDetailsChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.companyName && <p className="text-red-500 text-xs mt-0.5">{errors.companyName}</p>}</div>
-                    <div><label htmlFor="vatNumber_edit" className="block text-xs font-medium text-gray-600">BTW-nummer</label><input type="text" name="vatNumber" id="vatNumber_edit" value={formData.invoiceDetails?.vatNumber || ''} onChange={handleInvoiceDetailsChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/></div>
-                    <p className="text-xs text-gray-500">Factuuradres (indien afwijkend):</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
-                        <div className="md:col-span-2"><label htmlFor="invoiceAddress.street_edit" className="block text-xs font-medium text-gray-600">Straat</label><input type="text" name="invoiceAddress.street" id="invoiceAddress.street_edit" value={formData.invoiceDetails?.invoiceAddress?.street || ''} onChange={handleInvoiceDetailsChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.invoiceStreet && <p className="text-red-500 text-xs mt-0.5">{errors.invoiceStreet}</p>}</div>
-                        <div><label htmlFor="invoiceAddress.houseNumber_edit" className="block text-xs font-medium text-gray-600">Huisnr.</label><input type="text" name="invoiceAddress.houseNumber" id="invoiceAddress.houseNumber_edit" value={formData.invoiceDetails?.invoiceAddress?.houseNumber || ''} onChange={handleInvoiceDetailsChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.invoiceHouseNumber && <p className="text-red-500 text-xs mt-0.5">{errors.invoiceHouseNumber}</p>}</div>
-                        <div><label htmlFor="invoiceAddress.postalCode_edit" className="block text-xs font-medium text-gray-600">Postcode</label><input type="text" name="invoiceAddress.postalCode" id="invoiceAddress.postalCode_edit" value={formData.invoiceDetails?.invoiceAddress?.postalCode || ''} onChange={handleInvoiceDetailsChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.invoicePostalCode && <p className="text-red-500 text-xs mt-0.5">{errors.invoicePostalCode}</p>}</div>
-                        <div className="md:col-span-2"><label htmlFor="invoiceAddress.city_edit" className="block text-xs font-medium text-gray-600">Plaats</label><input type="text" name="invoiceAddress.city" id="invoiceAddress.city_edit" value={formData.invoiceDetails?.invoiceAddress?.city || ''} onChange={handleInvoiceDetailsChange} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/>{errors.invoiceCity && <p className="text-red-500 text-xs mt-0.5">{errors.invoiceCity}</p>}</div>
-                    </div>
-                    <div><label htmlFor="remarks_edit" className="block text-xs font-medium text-gray-600">Opmerkingen factuur</label><textarea name="remarks" id="remarks_edit" value={formData.invoiceDetails?.remarks || ''} onChange={handleInvoiceDetailsChange} rows={2} className="mt-0.5 block w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500"/></div>
-                 </fieldset>
-            )}
+          {/* Booking Details */}
+          <fieldset className="border border-slate-300 p-4 rounded-lg shadow-sm">
+            <legend className="text-lg font-medium text-slate-600 px-2">Reserveringsdetails</legend>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="showSlotId" className="block text-sm font-medium text-slate-700 mb-1">Show Slot</label>
+                <select name="showSlotId" id="showSlotId" value={formData.showSlotId || ''} onChange={handleInputChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                  <option value="">Selecteer Show Slot</option>
+                  {showSlots.map(slot => (
+                    <option key={slot.id} value={slot.id}>
+                      {new Date(slot.date).toLocaleDateString('nl-NL')} {slot.time} - {slot.name || 'Reguliere Show'} (Cap: {slot.capacity}, Geb: {slot.bookedCount})
+                    </option>
+                  ))}
+                </select>
+                {errors.showSlotId && <p className="text-red-500 text-xs mt-1">{errors.showSlotId}</p>}
+              </div>
+              <div>
+                <label htmlFor="packageId" className="block text-sm font-medium text-slate-700 mb-1">Pakket</label>
+                <select 
+                    name="packageId" 
+                    id="packageId" 
+                    value={formData.packageId || ''} 
+                    onChange={handleInputChange} 
+                    className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    disabled={!currentShowSlot}
+                >
+                  <option value="">Selecteer Pakket</option>
+                  {currentShowSlot && packages
+                    .filter(pkg => currentShowSlot.availablePackageIds?.includes(pkg.id))
+                    .map(pkg => (
+                      <option key={pkg.id} value={pkg.id}>{pkg.name} (€{pkg.price?.toFixed(2) || 'N/A'})</option>
+                  ))}
+                </select>
+                {errors.packageId && <p className="text-red-500 text-xs mt-1">{errors.packageId}</p>}
+              </div>
+              <div>
+                <label htmlFor="guests" className="block text-sm font-medium text-slate-700 mb-1">Aantal Gasten</label>
+                <input type="number" name="guests" id="guests" value={formData.guests || 1} onChange={handleInputChange} min="1" className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" />
+                {errors.guests && <p className="text-red-500 text-xs mt-1">{errors.guests}</p>}
+              </div>
+               <div>
+                <label htmlFor="status" className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+                <select name="status" id="status" value={formData.status || ''} onChange={handleInputChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                    <option value="confirmed">Bevestigd</option>
+                    <option value="pending_approval">Wacht op goedkeuring</option>
+                    <option value="waitlisted">Wachtlijst</option>
+                    <option value="cancelled">Geannuleerd</option>
+                    <option value="completed">Voltooid</option>
+                    <option value="pending_payment">Wacht op betaling</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
           
-
-          <div>
-            <label htmlFor="celebrationDetails_edit_modal" className="block text-sm font-medium text-gray-700">Iets te vieren?</label>
-            <input type="text" name="celebrationDetails" id="celebrationDetails_edit_modal" value={formData.celebrationDetails || ''} onChange={handleInputChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500"/>
-          </div>
-          <div>
-            <label htmlFor="dietaryWishes_edit_modal" className="block text-sm font-medium text-gray-700">Dieetwensen</label>
-            <textarea name="dietaryWishes" id="dietaryWishes_edit_modal" value={formData.dietaryWishes || ''} onChange={handleInputChange} rows={2} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500"/>
-          </div>
-
-          <fieldset className="border border-gray-300 p-3 rounded-md">
-                <legend className="text-sm font-medium text-gray-700 px-1">Plaatsing & Opmerkingen Admin</legend>
-                <div className="space-y-3">
-                    <label className="flex items-center space-x-2">
-                        <input type="checkbox" name="isMPL" checked={formData.isMPL || false} onChange={handleInputChange} className="form-checkbox h-4 w-4 text-blue-600 rounded"/>
-                        <span className="text-sm text-gray-700">MPL (Mooie Plaatsen)</span>
-                    </label>
+          {/* Address Details (Optional) */}
+            <fieldset className="border border-slate-300 p-4 rounded-lg shadow-sm">
+                <legend className="text-lg font-medium text-slate-600 px-2">Adresgegevens (Optioneel)</legend>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label htmlFor="placementPreferenceDetails_edit" className="block text-xs font-medium text-gray-600">Plaats Voorkeur Details</label>
-                        <textarea name="placementPreferenceDetails" id="placementPreferenceDetails_edit" value={formData.placementPreferenceDetails || ''} onChange={handleInputChange} rows={2} className="mt-0.5 w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500" placeholder="Bijv. graag bij het raam..."/>
+                        <label htmlFor="address.street" className="block text-sm font-medium text-slate-700 mb-1">Straat</label>
+                        <input type="text" name="street" id="address.street" value={formData.address?.street || ''} onChange={handleAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" />
                     </div>
-                     <div>
-                        <label htmlFor="internalAdminNotes_edit" className="block text-xs font-medium text-gray-600">Interne Admin Opmerkingen</label>
-                        <textarea name="internalAdminNotes" id="internalAdminNotes_edit" value={formData.internalAdminNotes || ''} onChange={handleInputChange} rows={2} className="mt-0.5 w-full border-gray-300 rounded-md shadow-sm p-1.5 text-sm focus:ring-blue-500 focus:border-blue-500" placeholder="Bijv. VIP..."/>
+                    <div>
+                        <label htmlFor="address.houseNumber" className="block text-sm font-medium text-slate-700 mb-1">Huisnummer</label>
+                        <input type="text" name="houseNumber" id="address.houseNumber" value={formData.address?.houseNumber || ''} onChange={handleAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" />
+                        {errors['address.houseNumber'] && <p className="text-red-500 text-xs mt-1">{errors['address.houseNumber']}</p>}
                     </div>
-                     <div>
-                        <label className="flex items-center space-x-2">
-                            <input type="checkbox" name="acceptsMarketingEmails" checked={formData.acceptsMarketingEmails || false} onChange={handleInputChange} className="form-checkbox h-4 w-4 text-blue-600 rounded"/>
-                            <span className="text-sm text-gray-700">Accepteert marketing e-mails</span>
-                        </label>
+                    <div>
+                        <label htmlFor="address.postalCode" className="block text-sm font-medium text-slate-700 mb-1">Postcode</label>
+                        <input type="text" name="postalCode" id="address.postalCode" value={formData.address?.postalCode || ''} onChange={handleAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" />
+                    </div>
+                    <div>
+                        <label htmlFor="address.city" className="block text-sm font-medium text-slate-700 mb-1">Plaats</label>
+                        <input type="text" name="city" id="address.city" value={formData.address?.city || ''} onChange={handleAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" />
+                    </div>
+                    <div>
+                        <label htmlFor="address.zipCode" className="block text-sm font-medium text-slate-700 mb-1">ZIP Code (Optioneel)</label>
+                        <input type="text" name="zipCode" id="address.zipCode" value={formData.address?.zipCode || ''} onChange={handleAddressChange} className="w-full p-2 border border-gray-300 rounded-md text-slate-700" />
+                    </div>
+                    <div>
+                        <label htmlFor="address.country" className="block text-sm font-medium text-slate-700 mb-1">Land (Optioneel)</label>
+                        <input type="text" name="country" id="address.country" value={formData.address?.country || ''} onChange={handleAddressChange} className="w-full p-2 border border-gray-300 rounded-md text-slate-700" />
                     </div>
                 </div>
             </fieldset>
-            
-           <div className="pt-3 border-t border-gray-200">
-                <h3 className="text-md font-medium text-gray-700 mb-2">Extra's</h3>
-                <div className="space-y-2">
-                    {specialAddons.find(sa => sa.id === 'voorborrel') && (
-                         <div className={`p-2 border rounded-md ${formData.selectedVoorborrel ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
-                            <label className="flex items-center space-x-2 cursor-pointer">
-                                <input type="checkbox" name="selectedVoorborrel" checked={formData.selectedVoorborrel || false} onChange={handleInputChange} 
-                                    disabled={!canSelectVoorborrel && !formData.selectedVoorborrel}
-                                    className="form-checkbox h-4 w-4 text-blue-600"/>
+
+          {/* Special Requests & Internal Notes */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label htmlFor="specialRequests" className="block text-sm font-medium text-slate-700 mb-1">Speciale Verzoeken</label>
+              <textarea name="specialRequests" id="specialRequests" value={formData.specialRequests || ''} onChange={handleInputChange} rows={3} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+            </div>
+            <div>
+              <label htmlFor="internalNotes" className="block text-sm font-medium text-slate-700 mb-1">Interne Notities</label>
+              <textarea name="internalNotes" id="internalNotes" value={formData.internalNotes || ''} onChange={handleInputChange} rows={3} className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+            </div>
+          </div>
+          
+          {/* Merchandise */}
+          <fieldset className="border border-slate-300 p-4 rounded-lg shadow-sm">
+            <legend className="text-lg font-medium text-slate-600 px-2">Merchandise</legend>
+            <div className="space-y-3">
+              {merchandiseItems.map(item => (
+                <div key={item.id} className="flex items-center justify-between">
+                  <div>
+                    <span className="font-medium text-slate-700">{item.name}</span>
+                    <span className="text-sm text-slate-500 ml-2">(€{item.priceInclVAT.toFixed(2)})</span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.merchandise?.find(m => m.itemId === item.id)?.quantity || 0}
+                    onChange={(e) => handleMerchandiseChange(item.id, parseInt(e.target.value, 10))}
+                    className="w-20 p-1 border border-gray-300 rounded-md shadow-sm text-center"
+                  />
+                </div>
+              ))}
+            </div>
+          </fieldset>
+
+          {/* Invoice Details */}
+            <fieldset className="border border-slate-300 p-4 rounded-lg shadow-sm">
+                <legend className="text-lg font-medium text-slate-600 px-2">Factuurgegevens</legend>
+                <div className="space-y-3">
+                    <div className="flex items-center">
+                        <input type="checkbox" name="generateInvoice" id="generateInvoice" checked={formData.invoiceDetails?.generateInvoice || false} onChange={handleInvoiceDetailsChange} className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
+                        <label htmlFor="generateInvoice" className="ml-2 block text-sm text-slate-700">Factuur genereren?</label>
+                    </div>
+                    {formData.invoiceDetails?.generateInvoice && (
+                        <div className="space-y-4 pl-6 border-l-2 border-indigo-200 py-2">
+                             <div>
+                                <label htmlFor="invoiceDetails.companyName" className="block text-sm font-medium text-slate-700 mb-1">Bedrijfsnaam (Factuur)</label>
+                                <input type="text" name="companyName" id="invoiceDetails.companyName" value={formData.invoiceDetails?.companyName || ''} onChange={handleInvoiceDetailsChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                            </div>
+                            <div>
+                                <label htmlFor="invoiceDetails.vatNumber" className="block text-sm font-medium text-slate-700 mb-1">BTW-nummer (Factuur)</label>
+                                <input type="text" name="vatNumber" id="invoiceDetails.vatNumber" value={formData.invoiceDetails?.vatNumber || ''} onChange={handleInvoiceDetailsChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <span className={!canSelectVoorborrel && !formData.selectedVoorborrel ? "text-gray-400" : ""}>Borrel Vooraf (€{specialAddons.find(sa => sa.id === 'voorborrel')?.price.toFixed(2)} p.p.)</span>
-                                    {!canSelectVoorborrel && formData.guests < (voorborrelAddon?.minPersons || 0) && <span className="text-xs text-orange-500 block"> (Min. {specialAddons.find(sa => sa.id === 'voorborrel')?.minPersons} gasten, huidig: {formData.guests})</span>}
+                                    <label htmlFor="invoiceDetails.address.street" className="block text-sm font-medium text-slate-700 mb-1">Straat (Factuur)</label>
+                                    <input type="text" name="street" id="invoiceDetails.address.street" value={formData.invoiceDetails?.address?.street || ''} onChange={handleInvoiceAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                                    {errors['invoiceDetails.address.street'] && <p className="text-red-500 text-xs mt-1">{errors['invoiceDetails.address.street']}</p>}
                                 </div>
-                            </label>
-                             {errors.voorborrel && <p className="text-red-500 text-xs mt-1">{errors.voorborrel}</p>}
-                         </div>
-                    )}
-                     {specialAddons.find(sa => sa.id === 'naborrel') && (
-                        <div className={`p-2 border rounded-md ${formData.selectedNaborrel ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                            <input type="checkbox" name="selectedNaborrel" checked={formData.selectedNaborrel || false} onChange={handleInputChange} className="form-checkbox h-4 w-4 text-blue-600"/>
-                            <span>AfterParty (€{specialAddons.find(sa => sa.id === 'naborrel')?.price.toFixed(2)} p.p.)</span>
-                        </label>
+                                <div>
+                                    <label htmlFor="invoiceDetails.address.houseNumber" className="block text-sm font-medium text-slate-700 mb-1">Huisnummer (Factuur)</label>
+                                    <input type="text" name="houseNumber" id="invoiceDetails.address.houseNumber" value={formData.invoiceDetails?.address?.houseNumber || ''} onChange={handleInvoiceAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                                    {errors['invoiceDetails.address.houseNumber'] && <p className="text-red-500 text-xs mt-1">{errors['invoiceDetails.address.houseNumber']}</p>}
+                                </div>
+                                <div>
+                                    <label htmlFor="invoiceDetails.address.postalCode" className="block text-sm font-medium text-slate-700 mb-1">Postcode (Factuur)</label>
+                                    <input type="text" name="postalCode" id="invoiceDetails.address.postalCode" value={formData.invoiceDetails?.address?.postalCode || ''} onChange={handleInvoiceAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                                    {errors['invoiceDetails.address.postalCode'] && <p className="text-red-500 text-xs mt-1">{errors['invoiceDetails.address.postalCode']}</p>}
+                                </div>
+                                <div>
+                                    <label htmlFor="invoiceDetails.address.city" className="block text-sm font-medium text-slate-700 mb-1">Plaats (Factuur)</label>
+                                    <input type="text" name="city" id="invoiceDetails.address.city" value={formData.invoiceDetails?.address?.city || ''} onChange={handleInvoiceAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                                    {errors['invoiceDetails.address.city'] && <p className="text-red-500 text-xs mt-1">{errors['invoiceDetails.address.city']}</p>}
+                                </div>
+                                 <div>
+                                    <label htmlFor="invoiceDetails.address.zipCode" className="block text-sm font-medium text-slate-700 mb-1">ZIP Code (Factuur)</label>
+                                    <input type="text" name="zipCode" id="invoiceDetails.address.zipCode" value={formData.invoiceDetails?.address?.zipCode || ''} onChange={handleInvoiceAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                                    {errors['invoiceDetails.address.zipCode'] && <p className="text-red-500 text-xs mt-1">{errors['invoiceDetails.address.zipCode']}</p>}
+                                </div>
+                                <div>
+                                    <label htmlFor="invoiceDetails.address.country" className="block text-sm font-medium text-slate-700 mb-1">Land (Factuur)</label>
+                                    <input type="text" name="country" id="invoiceDetails.address.country" value={formData.invoiceDetails?.address?.country || ''} onChange={handleInvoiceAddressChange} className="w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                                    {errors['invoiceDetails.address.country'] && <p className="text-red-500 text-xs mt-1">{errors['invoiceDetails.address.country']}</p>}
+                                </div>
+                            </div>
+                             <div>
+                                <label htmlFor="invoiceDetails.remarks" className="block text-sm font-medium text-slate-700 mb-1">Opmerkingen (Factuur)</label>
+                                <textarea name="remarks" id="invoiceDetails.remarks" value={formData.invoiceDetails?.remarks || ''} onChange={handleInvoiceDetailsChange} rows={2} className="w-full p-2 border border-gray-300 rounded-md shadow-sm"></textarea>
+                            </div>
                         </div>
                     )}
                 </div>
+            </fieldset>
+            
+            {/* Promo Code & Price */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+                <div>
+                    <label htmlFor="appliedPromoCode" className="block text-sm font-medium text-slate-700 mb-1">Toegepaste Promocode</label>
+                    <input 
+                        type="text" 
+                        name="appliedPromoCode" 
+                        id="appliedPromoCode" 
+                        value={formData.appliedPromoCode || ''} 
+                        onChange={handleInputChange}
+                        className="w-full p-2 border border-gray-300 rounded-md shadow-sm bg-slate-50"
+                        // readOnly // Or make it editable if admin can change it
+                    />
+                    {/* Add logic to apply/validate promo code if editable */}
+                </div>
+                <div className="text-right">
+                    <p className="text-lg font-semibold text-slate-700">Totaalprijs: €{calculatedPrice.toFixed(2)}</p>
+                    {formData.discountAmount && formData.discountAmount > 0 && (
+                        <p className="text-sm text-green-600">Korting: €{formData.discountAmount.toFixed(2)}</p>
+                    )}
+                </div>
             </div>
-          
-          {merchandiseItems.length > 0 && (
-            <div className="pt-3 border-t border-gray-200">
-              <h3 className="text-md font-medium text-gray-700 mb-2">Merchandise</h3>
-              <div className="space-y-2 max-h-40 overflow-y-auto pr-1 scrollbar">
-                {Object.entries(groupedMerchandise).map(([category, items]) => (
-                    <div key={category}>
-                        <h4 className="text-sm font-semibold text-blue-500 mb-1 sticky top-0 bg-white py-0.5">{category}</h4>
-                        {items.map(item => (
-                        <div key={item.id} className="flex items-center justify-between p-2 border border-gray-200 rounded-md text-sm">
-                            <div className="flex items-center">
-                                {item.imageUrl && <img src={item.imageUrl} alt={item.name} className="w-8 h-8 object-cover rounded mr-2"/>}
-                                <span>{item.name} (€{item.priceInclVAT.toFixed(2)})</span>
-                            </div>
-                            <input type="number" min="0" className="w-16 border-gray-300 rounded-md shadow-sm p-1 text-xs"
-                            value={formData.merchandise?.find(oi => oi.itemId === item.id)?.quantity || 0}
-                            onChange={(e) => handleMerchQuantityChange(item.id, parseInt(e.target.value) || 0)}
-                            aria-label={`Aantal ${item.name}`}/>
-                        </div>
-                        ))}
-                    </div>
-                ))}
-              </div>
-            </div>
-          )}
 
-           <div className="pt-3 border-t border-slate-200">
-            <label htmlFor="editPromoCodeInput" className="block text-sm font-medium text-gray-700 mb-1">Kortingscode / Cadeaubon</label>
-            <div className="flex items-center space-x-2">
-                <input type="text" id="editPromoCodeInput" value={promoCodeInput} onChange={e => setPromoCodeInput(e.target.value.toUpperCase())} placeholder="Voer code in of laat leeg" className="flex-grow border-gray-300 rounded-md shadow-sm p-2 focus:ring-blue-500 focus:border-blue-500"/>
-                <button type="button" onClick={handleApplyPromoCodeButton} className="bg-sky-500 hover:bg-sky-600 text-white font-semibold py-2 px-3 rounded-md text-sm transition-colors">Pas Code Toe/Verwijder</button>
-            </div>
-            {promoCodeEditMessage && <p className={`text-xs mt-1 p-1 rounded ${promoCodeEditMessage.type === 'success' ? 'bg-green-50 text-green-700' : promoCodeEditMessage.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>{promoCodeEditMessage.text}</p>}
+
+          {/* Action Buttons */}
+          <div className="flex justify-end space-x-3 pt-4">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+              Annuleren
+            </button>
+            <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-transparent rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+              Opslaan
+            </button>
           </div>
-
-          <div className="pt-3 border-t border-gray-200">
-            <label className="flex items-center space-x-2">
-                <input type="checkbox" name="isPaid" checked={formData.isPaid || false} onChange={handleInputChange} className="form-checkbox h-4 w-4 text-blue-600 rounded"/>
-                <span className="text-sm font-medium text-gray-700">Markeer als betaald</span>
-            </label>
-          </div>
-           <p className="text-xs text-gray-600 mt-2">Subtotaal (voor evt. korting): €{calculateSubtotal().toFixed(2)}</p>
-            {currentAppliedPromo && currentDiscountAmount !== undefined && (
-                <p className="text-sm text-green-600">Toegepaste Korting ({currentAppliedPromo}): -€{currentDiscountAmount.toFixed(2)}</p>
-             )}
-          <p className="text-lg font-semibold mt-1 text-right">Totaal: €{calculateTotalPrice()}</p>
-
         </form>
-        <div className="flex justify-end items-center pt-4 border-t border-gray-200 space-x-3">
-            <button type="button" onClick={onClose} className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-md transition-colors text-sm">Annuleren</button>
-            <button onClick={handleSubmit} className="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-5 rounded-md transition-colors text-sm">Wijzigingen Opslaan</button>
-        </div>
       </div>
     </div>
   );

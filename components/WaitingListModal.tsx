@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { WaitingListEntry, ShowSlot } from '../types';
 
 interface WaitingListModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (entryData: Omit<WaitingListEntry, 'id' | 'timestamp' | 'showInfo'>) => void;
+  onSubmit: (entryData: Omit<WaitingListEntry, 'id' | 'creationTimestamp' | 'status' | 'showInfo'>) => Promise<boolean | void>; // Adjusted Omit
   showSlotId: string;
   showSlotInfo?: ShowSlot; // For displaying date/time
 }
@@ -65,10 +64,21 @@ export const WaitingListModal: React.FC<WaitingListModalProps> = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (validateForm()) {
-      onSubmit({ showSlotId, name, email, phone, guests });
+      // Construct entryData based on the expected type in App.tsx's handleAddToWaitingList
+      const entryData: Omit<WaitingListEntry, 'id' | 'creationTimestamp' | 'status' | 'showInfo'> = {
+        showSlotId, // Already available in props
+        name,
+        email,
+        phone,
+        guests,
+        dateAdded: new Date().toISOString(), // Added dateAdded
+        // customerId and notes can be added here if the form is extended
+      };
+      await onSubmit(entryData); 
+      // onClose will be called from App.tsx if submission is successful
     }
   };
 

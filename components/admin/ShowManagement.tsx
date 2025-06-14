@@ -1,16 +1,17 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShowSlot, PackageOption, WaitingListEntry, ShowType } from '../../types';
+import { ShowSlot, PackageOption, ShowType, WaitingListEntry } from '../../types'; // Added WaitingListEntry
 import { CalendarView } from '../CalendarView';
 import { SHOW_TYPE_COLORS } from '../../constants';
 
 interface ShowManagementProps {
   availableShowSlots: ShowSlot[];
-  onAddShowSlot: (newSlotData: Omit<ShowSlot, 'id' | 'bookedCount'>) => void;
-  onRemoveShowSlot: (slotId: string) => Promise<void>; // Updated return type
+  onAddShowSlot: (newSlotData: Omit<ShowSlot, 'id' | 'bookedCount' | 'availableSlots' | 'isManuallyClosed'>) => void; // Corrected type
+  onRemoveShowSlot: (slotId: string) => Promise<void>; 
   onUpdateShowSlot: (slot: ShowSlot) => void;
   allPackages: PackageOption[];
   waitingListEntries: WaitingListEntry[];
+  // appSettings: AppSettings; // Removed appSettings
+  // showToast: (message: string, type: 'success' | 'error' | 'info' | 'warning') => void; // Removed, not used
 }
 
 const DEFAULT_CAPACITY = 250;
@@ -31,6 +32,8 @@ export const ShowManagement: React.FC<ShowManagementProps> = ({
   onUpdateShowSlot,
   allPackages,
   waitingListEntries,
+  // appSettings, // Removed
+  // showToast, // Removed
 }) => {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -142,6 +145,8 @@ export const ShowManagement: React.FC<ShowManagementProps> = ({
       availablePackageIds: formSelectedPackageIds,
       isManuallyClosed: formIsManuallyClosed,
       showType: formShowType,
+      // availableSlots will be set in App.tsx based on capacity
+      // bookedCount will be initialized to 0 in App.tsx
     };
 
     if (editingSlot) {
@@ -296,7 +301,7 @@ export const ShowManagement: React.FC<ShowManagementProps> = ({
                     <label key={pkg.id} className="flex items-center space-x-2 p-2 bg-white rounded-md hover:bg-slate-100 cursor-pointer border border-slate-200">
                         <input type="checkbox" checked={formSelectedPackageIds.includes(pkg.id)} onChange={() => handleFormPackageToggle(pkg.id)}
                         className="form-checkbox h-4 w-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500" />
-                        <span className="text-xs text-slate-700">{pkg.name} (€{pkg.price.toFixed(2)})</span>
+                        <span className="text-xs text-slate-700">{pkg.name} (€{pkg.price?.toFixed(2) || 'N/A'})</span>
                     </label>
                     ))}
                 </div>

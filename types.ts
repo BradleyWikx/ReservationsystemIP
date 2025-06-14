@@ -14,13 +14,14 @@ export interface PriceComponent {
 export interface PackageOption {
   id: string;
   name: string;
-  price: number;
+  price?: number; // Re-added for direct display/use, complement with priceLevels
   description: string;
   details: string[];
   days?: string;
   colorCode?: string;
   minPersons?: number;
   priceComponents: PriceComponent[];
+  priceLevels: Record<string, { pricePerPerson: number }>; // Added
 }
 
 export interface ShowSlot {
@@ -31,9 +32,21 @@ export interface ShowSlot {
   availablePackageIds: string[];
   capacity: number;
   bookedCount: number;
-  availableSlots: number; // Added availableSlots
+  availableSlots: number; // availableSlots = capacity - bookedCount, can be derived or stored
   isManuallyClosed: boolean;
   showType?: ShowType;
+  priceTier?: string; // Added
+  packageIds?: string[]; // Added
+}
+
+export interface Show { // Added Show interface
+  id: string;
+  title: string;
+  description: string;
+  showSlots: ShowSlot[]; // A show can have multiple slots (e.g., different times on the same day)
+  defaultPackageIds: string[];
+  venue: string;
+  notes?: string;
 }
 
 export interface MerchandiseItem {
@@ -58,13 +71,17 @@ export interface Address {
   houseNumber: string;
   postalCode: string;
   city: string;
+  zipCode?: string; // Added
+  country?: string; // Added
 }
 
 export interface InvoiceDetails {
-  needsInvoice: boolean;
+  generateInvoice: boolean; 
+  sendInvoice: boolean; 
   companyName?: string;
   vatNumber?: string;
-  invoiceAddress?: Address;
+  address?: Address; 
+  customMessage?: string; 
   remarks?: string;
 }
 
@@ -111,7 +128,8 @@ export interface PromoCode {
 }
 
 export interface ReservationDetails {
-  reservationId: string;
+  id?: string; // Firestore document ID, can be different from reservationId if not careful
+  reservationId: string; // Your custom unique reservation identifier
   showSlotId: string;
   customerId?: string;
   packageName: string;
@@ -126,6 +144,8 @@ export interface ReservationDetails {
   invoiceDetails?: InvoiceDetails;
   celebrationDetails?: string;
   dietaryWishes?: string;
+  specialRequests?: string; // Added
+  internalNotes?: string; // Added (or confirm if internalAdminNotes is this)
   merchandise?: OrderedMerchandiseItem[];
   selectedVoorborrel?: boolean;
   selectedNaborrel?: boolean;
@@ -135,10 +155,11 @@ export interface ReservationDetails {
   status: ReservationStatus;
   isMPL?: boolean;
   placementPreferenceDetails?: string;
-  internalAdminNotes?: string;
-  isOverbooking?: boolean; // Added to specifically flag overbooking attempts
-  notes?: string; // Added general notes
-  appliedPromoCode?: string;
+  internalAdminNotes?: string; // Keep for now, clarify if it's different from internalNotes
+  isOverbooking?: boolean; 
+  isGuestBooking?: boolean; // Added to distinguish guest bookings
+  notes?: string; 
+  appliedPromoCode?: string; // Standardized name
   discountAmount?: number;
   invoiceId?: string;
   needsInvoiceReview?: boolean;
@@ -146,15 +167,17 @@ export interface ReservationDetails {
   acceptsMarketingEmails?: boolean;
   agreedToPrivacyPolicy: boolean;
   cancellationReason?: string;
-  paymentDetails?: { // Added
+  paymentDetails?: {
     method: string;
     transactionId?: string;
+    amount?: number; // Added
     status: 'pending' | 'paid' | 'failed' | 'refunded' | 'paid_on_site' | 'invoiced';
   };
-  totalPrice: number; // Added
-  lastUpdatedTimestamp?: any; // Added (string or server timestamp)
-  bookedBy?: string; // Added
-  sendConfirmationEmail?: boolean; // Added
+  totalPrice: number; 
+  lastModifiedTimestamp?: string; // Changed type to string
+  lastUpdatedTimestamp?: any; 
+  bookedBy?: string; 
+  sendConfirmationEmail?: boolean; 
 }
 
 // Expanded BookingData interface
@@ -186,16 +209,17 @@ export interface BookingData {
 export interface WaitingListEntry {
   id: string;
   showSlotId: string;
-  showInfo: { date: string; time: string }; // Simplified for this context
+  showInfo: { date: string; time: string; name?: string }; // Added name to showInfo
   name: string;
   email: string;
-  phone: string;
-  guests: number;
-  timestamp: string; // Assuming this is dateAdded
-  notes?: string;
-  customerId?: string; // Added
-  dateAdded: any; // Added (string or server timestamp)
-  status: 'pending' | 'contacted' | 'booked' | 'unavailable'; // Added
+  phone: string; // Added
+  guests: number; // Added
+  packageId?: string; // Added
+  packageName?: string; // Added
+  notes?: string; // Added
+  creationTimestamp: string; // Added
+  dateAdded: string; // <<< ADDED
+  status: 'pending' | 'contacted' | 'booked' | 'cancelled'; // Added
 }
 
 export interface AuditLogEntry {
@@ -211,22 +235,15 @@ export interface AuditLogEntry {
   newState?: any; // Optional: for detailed change tracking
 }
 
-export interface InvoiceLineItem {
-  id: string;
-  description: string;
-  quantity: number;
-  unitPrice: number; // Changed from unitPriceExclVat, assuming inclusive
-  vatRate: number; // Percentage, e.g., 21
-  itemId?: string; // Added itemId
-}
-
 export interface Invoice {
   id: string;
-  invoiceNumber: string;
-  reservationId?: string; // Optional if it's a generic invoice not tied to a booking
+  reservationId: string;
   customerId: string;
-  invoiceDate: string; // YYYY-MM-DD
-  dueDate: string; // YYYY-MM-DD
+  invoiceDate: string;
+  dueDate: string;
+  totalAmount: number;
+  status: 'pending_payment' | 'paid' | 'overdue' | 'cancelled' | 'refunded' | 'credited' | 'draft';
+  items: InvoiceItem[];
   customerDetails: {
     name: string;
     email: string;
@@ -234,54 +251,27 @@ export interface Invoice {
     address?: Address;
     companyName?: string;
     vatNumber?: string;
-    invoiceAddress?: Address; // If different from primary address
   };
-  companyDetails: CompanyDetails; // Your company's details
-  lineItems: InvoiceLineItem[];
-  subTotalExclVat: number;
-  vatSummary: { vatRate: number; baseAmountExclVat: number; totalVatAmount: number }[];
-  totalVatAmount: number;
-  discountAmountOnInclVatTotal?: number; // Discount applied to the total including VAT
-  grandTotalInclVat: number;
-  status: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled' | 'credited';
+  companyDetails: CompanyDetails;
+  invoiceNumber: string;
+  paymentDetails?: string;
   notes?: string;
-  paymentDetails?: string; // e.g., "Paid on YYYY-MM-DD via iDEAL", "Credited on YYYY-MM-DD"
-  creationTimestamp: string;
-  lastUpdateTimestamp: string;
-  originalInvoiceId?: string; // For credit notes, the ID of the invoice being credited
-  creditedByInvoiceId?: string; // For original invoices, the ID of the credit note if it exists
+  creditedByInvoiceId?: string; // ID of the credit note if this invoice was credited
+  creditForInvoiceId?: string; // ID of the original invoice if this is a credit note
 }
 
-export enum StaffRole {
-  ZAAL = 'Zaal',
-  KEUKEN = 'Keuken',
-  BAR = 'Bar',
-  TECHNIEK = 'Techniek',
-  MANAGEMENT = 'Management',
-  OVERIG = 'Overig',
-}
-
-export interface StaffMember {
-  id: string;
-  name: string;
-  role: StaffRole;
-  contactInfo?: string; // email or phone
-  notes?: string;
-  unavailableDates?: string[]; // Array of YYYY-MM-DD strings
-}
-
-export interface ScheduledShift {
-  id: string;
-  staffMemberId: string;
-  showSlotId: string;
-  roleDuringShift: StaffRole; // Could be different from default role
-  shiftNotes?: string;
+export interface InvoiceItem {
+  description: string;
+  quantity: number;
+  unitPrice: number; // Price per unit EXCL VAT if you store it that way, or INCL VAT if consistent
+  totalPrice: number; // quantity * unitPrice (then add VAT or ensure it's included based on unitPrice)
+  vatRate: number; // e.g., 21 for 21%
 }
 
 export interface CompanyDetails {
   name: string;
   addressLine1: string;
-  addressLine2?: string; // Optional
+  addressLine2?: string;
   phone: string;
   email: string;
   vatNumber: string;
@@ -295,43 +285,71 @@ export interface AppSettings {
   companyDetails: CompanyDetails;
   lastInvoiceNumber: number;
   invoiceDueDays: number;
-  vatRateHigh: number; // e.g., 21
-  vatRateLow: number;  // e.g., 9
+  vatRateHigh: number;
+  vatRateLow: number;
   invoiceNrPrefix: string;
   defaultShowId?: string;
   defaultPackageId?: string;
-  paymentInstructions: string; // Added
-  currencySymbol: string; // Added
-  // Potentially add more settings like email templates, default texts etc.
+  paymentInstructions?: string;
+  currencySymbol: string;
+  // Potentially add other global settings here
 }
 
-export type AdminMode =
-  | 'dashboard'
-  | 'shows'
-  | 'bulkAddShows'
-  | 'bookings'
-  | 'manualBooking'
-  | 'pendingApprovals'
-  | 'waitingList'
-  | 'dailyPrintout'
-  | 'merchandise'
-  | 'customers'
-  | 'promoCodes'
-  | 'auditLog'
-  | 'invoices'
-  | 'staffScheduling'
-  | 'reports'
-  | 'settings'
-  | 'rejectedBookingsArchive';
+// Added StaffMember and ScheduledShift
+export interface StaffMember {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  roles: StaffRole[]; // Changed from role?: StaffRole to roles: StaffRole[]
+  availability?: { // Added for more detailed availability
+    monday?: string[];
+    tuesday?: string[];
+    wednesday?: string[];
+    thursday?: string[];
+    friday?: string[];
+    saturday?: string[];
+    sunday?: string[];
+  };
+  skills?: string[]; // Added
+  performanceHistory?: any[]; // Added
+  hourlyRate?: number;
+  isActive?: boolean;
+  contactInfo: { // Changed from string to object
+    address: Address;
+    emergencyContact: {
+      name: string;
+      phone: string;
+      relationship: string;
+    };
+  };
+  notes?: string; 
+  unavailableDates?: string[]; // Kept as string[] for YYYY-MM-DD
+}
 
-// Added ManualBookingSubmitDetails interface
-export interface ManualBookingSubmitDetails {
+export type StaffRole = 'zaal' | 'keuken' | 'bar' | 'techniek' | 'management' | 'onbepaald';
+
+export const staffRolesArray: StaffRole[] = ['zaal', 'keuken', 'bar', 'techniek', 'management', 'onbepaald'];
+
+export interface ScheduledShift {
+  id: string;
+  staffMemberId: string;
+  showId?: string; 
+  showSlotId?: string; // Added showSlotId
+  startTime: Date;
+  endTime: Date;
+  roleAssigned: StaffRole; 
+  shiftNotes?: string;
+}
+
+// Payload for Manual Booking Form
+export interface ManualBookingPayload {
   showSlotId: string;
   packageId: string;
+  guests: number;
   name: string;
   email: string;
   phone: string;
-  guests: number;
   address?: Address;
   invoiceDetails?: InvoiceDetails;
   celebrationDetails?: string;
@@ -339,10 +357,36 @@ export interface ManualBookingSubmitDetails {
   merchandise?: OrderedMerchandiseItem[];
   selectedVoorborrel?: boolean;
   selectedNaborrel?: boolean;
+  isPaid?: boolean;
   isMPL?: boolean;
   placementPreferenceDetails?: string;
   internalAdminNotes?: string;
+  appliedPromoCode?: string;
+  discountAmount?: number;
+  totalPrice: number;
+  customerId?: string;
   acceptsMarketingEmails?: boolean;
-  // Note: agreedToPrivacyPolicy is handled by the booking function
-  // Note: status, bookingTimestamp etc. are set by the booking function
 }
+
+
+// AdminMode might need to be expanded if new sections are added
+export type AdminMode =
+  | 'dashboard'
+  | 'shows'
+  | 'bulkAddShows'
+  | 'bookings'
+  | 'pendingApprovals'
+  | 'overBookings' // Added for the new section
+  | 'waitingList'
+  | 'waitlistedBookings' // Added for bookings that are on waitlist
+  | 'manualBooking'
+  | 'rejectedBookingsArchive'
+  | 'customers'
+  | 'merchandise'
+  | 'dailyPrintout'
+  | 'staffScheduling'
+  | 'invoices'
+  | 'promoCodes'
+  | 'reports'
+  | 'auditLog'
+  | 'settings';

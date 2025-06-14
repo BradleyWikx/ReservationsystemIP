@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { ShowSlot, PackageOption, ShowType } from '../types'; 
 import { ShowFilterControls } from './ShowFilterControls';
@@ -8,8 +7,11 @@ interface UserBookingPageProps {
   availableShowSlots: ShowSlot[];
   onBookShow: (slot?: ShowSlot) => void;
   allPackages: PackageOption[]; 
+  merchandiseItems: MerchandiseItem[]; // Added
+  onOpenWaitingListModal: (slotId: string) => void; // Added this line
   onNavigateToAdminView: () => void;
   onNavigateToUserAccountView: () => void; 
+  appSettings: AppSettings; // Added
 }
 
 // Helper function to get unique months from show slots
@@ -46,7 +48,7 @@ const calculateEndTime = (startTimeStr: string, durationHours: number): string =
   return `${endHours}:${endMinutes}`;
 };
 
-export const UserBookingPage: React.FC<UserBookingPageProps> = ({ availableShowSlots, onBookShow, allPackages, onNavigateToAdminView, onNavigateToUserAccountView }) => {
+export const UserBookingPage: React.FC<UserBookingPageProps> = ({ availableShowSlots, onBookShow, allPackages, merchandiseItems, onOpenWaitingListModal, onNavigateToAdminView, onNavigateToUserAccountView, appSettings }) => {
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedShowType, setSelectedShowType] = useState<ShowType | ''>('');
   

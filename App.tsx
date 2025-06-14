@@ -2,10 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { AdminPage } from './components/admin/AdminPage';
 import { UserBookingPage } from './components/UserBookingPage';
 import { BookingStepper } from './components/booking/BookingStepper';
-import { SimpleBookingStepper } from './components/SimpleBookingStepper';
 import { BookingConfirmationModal } from './components/BookingConfirmationModal';
-import { SimpleBookingModal } from './components/SimpleBookingModal';
-import { TestModal } from './components/TestModal';
 import { WaitingListModal } from './components/WaitingListModal';
 import { ToastContainer, ToastMessage } from './components/shared/ToastNotifications';
 import { sendBookingConfirmationEmail, sendBookingConfirmationToAdmin, BookingEmailData } from './services/emailService';
@@ -169,8 +166,8 @@ const App: React.FC = () => {
 
   // --- HANDLERS FIRESTORE ---
   // Shows
-  const handleAddShowSlot = async (newSlotData: Omit<ShowSlot, 'id' | 'bookedCount' | 'isManuallyClosed'>) => {
-    await addDoc(collection(db, 'shows'), { ...newSlotData, bookedCount: 0, isManuallyClosed: false });
+  const handleAddShowSlot = async (newSlotData: Omit<ShowSlot, 'id' | 'bookedCount' | 'isManuallyClosed' | 'availableSlots'>) => {
+    await addDoc(collection(db, 'shows'), { ...newSlotData, bookedCount: 0, isManuallyClosed: false, availableSlots: newSlotData.capacity }); // availableSlots initieel gelijk aan capacity
     showToast('Show toegevoegd!', 'success');
   };
   const handleRemoveShowSlot = async (slotId: string) => {
@@ -232,11 +229,39 @@ const App: React.FC = () => {
     showToast('Kortingscode verwijderd!', 'success');
     return true;
   };
-  const applyPromoCode = (codeString: string, currentBookingSubtotal: number) => {
-    return { success: false, message: 'Promo code functionaliteit niet geïmplementeerd' };
+  const applyPromoCode = (codeString: string, currentBookingSubtotal: number): { success: boolean; discountAmount?: number; message: string; appliedCodeObject?: PromoCode } => {
+    const promoCode = promoCodes.find(pc => pc.code === codeString && pc.isActive);
+    if (!promoCode) {
+      return { success: false, message: 'Kortingscode niet gevonden of niet actief.' };
+    }
+    if (promoCode.expirationDate && new Date(promoCode.expirationDate) < new Date()) {
+      return { success: false, message: 'Kortingscode is verlopen.' };
+    }
+    if (promoCode.usageLimit && promoCode.timesUsed >= promoCode.usageLimit) {
+      return { success: false, message: 'Kortingscode heeft zijn gebruikslimiet bereikt.' };
+    }
+    if (promoCode.minBookingAmount && currentBookingSubtotal < promoCode.minBookingAmount) {
+      return { success: false, message: `Minimaal boekingsbedrag van ${appSettings.currencySymbol}${promoCode.minBookingAmount} niet bereikt.` };
+    }
+
+    let discountAmount = 0;
+    if (promoCode.type === 'percentage') {
+      discountAmount = currentBookingSubtotal * (promoCode.value / 100);
+    } else if (promoCode.type === 'fixed_amount') {
+      discountAmount = promoCode.value;
+    } else if (promoCode.type === 'gift_card') {
+      // Voor gift cards, de waarde is het tegoed. Kan niet meer zijn dan het subtotaal.
+      discountAmount = Math.min(promoCode.value, currentBookingSubtotal);
+    }
+    
+    // Zorg ervoor dat de korting niet hoger is dan het subtotaal
+    discountAmount = Math.min(discountAmount, currentBookingSubtotal);
+
+    showToast('Kortingscode succesvol toegepast!', 'success');
+    return { success: true, discountAmount, message: 'Kortingscode toegepast!', appliedCodeObject: promoCode };
   };
   // Bookings
-  const handleUpdateBooking = async (updatedBooking: ReservationDetails, adminConsentsToOverbooking: boolean = false) => {
+  const handleUpdateBooking = async (updatedBooking: ReservationDetails /*, adminConsentsToOverbooking: boolean = false*/) => {
     const { id, ...data } = updatedBooking as any;
     await updateDoc(doc(db, 'bookings', id), data);
     showToast('Boeking bijgewerkt!', 'success');
@@ -288,25 +313,106 @@ const App: React.FC = () => {
     return true;
   };
   // Facturen
-  const handleGenerateInvoice = async (reservationId: string) => {
-    showToast('Factuur genereren nog niet geïmplementeerd', 'info');
-    return null;
+  const handleGenerateInvoice = async (reservationId: string): Promise<Invoice | null> => {
+    const booking = allBookings.find(b => b.reservationId === reservationId);
+    if (!booking) {
+      showToast('Boeking niet gevonden voor factuur generatie.', 'error');
+      return null;
+    }
+    // Placeholder: In een echte implementatie zou hier een factuur object worden aangemaakt
+    // en mogelijk opgeslagen in Firebase, en een PDF worden gegenereerd.
+    const newInvoice: Invoice = {
+      id: `INV_${Date.now()}`,
+      reservationId: reservationId,
+      customerId: booking.customerId || 'N/A',
+      invoiceDate: new Date().toISOString(),
+      dueDate: new Date(Date.now() + (appSettings.invoiceDueDays || 14) * 86400000).toISOString(),
+      totalAmount: booking.totalPrice,
+      status: 'pending_payment',
+      items: [
+        { description: `Reservering ${booking.packageName}`, quantity: 1, unitPrice: booking.totalPrice, totalPrice: booking.totalPrice, vatRate: appSettings.vatRateHigh || 21 }
+      ],
+      customerDetails: {
+        name: booking.name,
+        email: booking.email,
+        phone: booking.phone,
+        address: booking.address,
+        companyName: booking.invoiceDetails?.companyName,
+        vatNumber: booking.invoiceDetails?.vatNumber,
+      },
+      companyDetails: appSettings.companyDetails,
+      invoiceNumber: `${appSettings.invoiceNrPrefix}${appSettings.lastInvoiceNumber + 1}`,
+      paymentDetails: appSettings.paymentInstructions,
+    };
+    // Simuleer opslaan en updaten van appSettings (in een echte app zou dit een transactie zijn)
+    try {
+      const invRef = await addDoc(collection(db, 'invoices'), newInvoice);
+      await updateDoc(doc(db, 'bookings', booking.id!), { invoiceId: invRef.id }); // Assuming booking.id is the Firestore doc ID
+      await updateDoc(doc(db, 'appSettings', 'main'), { lastInvoiceNumber: appSettings.lastInvoiceNumber + 1 });
+      showToast('Factuur succesvol aangemaakt (placeholder).', 'success');
+      // Return the created invoice with its new ID
+      return { ...newInvoice, id: invRef.id };
+    } catch (error) {
+      console.error("Error creating invoice (placeholder):", error);
+      showToast('Fout bij aanmaken factuur (placeholder).', 'error');
+      return null;
+    }
   };
   const handleUpdateInvoiceStatus = (invoiceId: string, status: Invoice['status'], paymentDetails?: string) => {
     updateDoc(doc(db, 'invoices', invoiceId), { status, paymentDetails });
     showToast('Factuurstatus bijgewerkt!', 'success');
   };
-  const handleGenerateInvoicesForDay = async (selectedDate: string) => {
+  const handleGenerateInvoicesForDay = async (/*selectedDate: string*/) => { // Commented out unused param
     showToast('Dagfacturatie nog niet geïmplementeerd', 'info');
     return { successCount: 0, failCount: 0, alreadyExistsCount: 0 };
   };
-  const handleCreateCreditNote = (originalInvoiceId: string) => {
-    showToast('Creditnota nog niet geïmplementeerd', 'info');
-    return null;
+  const handleCreateCreditNote = async (originalInvoiceId: string): Promise<Invoice | null> => {
+    const originalInvoice = invoices.find(inv => inv.id === originalInvoiceId);
+    if (!originalInvoice) {
+      showToast('Originele factuur niet gevonden voor creditnota.', 'error');
+      return null;
+    }
+    // Placeholder: Logica voor creditnota
+    const creditNote: Invoice = {
+      ...originalInvoice,
+      id: `CN_${Date.now()}`,
+      invoiceNumber: `CN-${originalInvoice.invoiceNumber}`,
+      status: 'credited',
+      totalAmount: -originalInvoice.totalAmount, // Negatief bedrag
+      items: originalInvoice.items.map(item => ({ ...item, unitPrice: -item.unitPrice, totalPrice: -item.totalPrice })),
+      invoiceDate: new Date().toISOString(),
+      // dueDate: new Date().toISOString(), // Creditnota's hebben meestal geen vervaldatum
+    };
+    try {
+      const cnRef = await addDoc(collection(db, 'invoices'), creditNote);
+      // Optioneel: update de originele factuur status
+      await updateDoc(doc(db, 'invoices', originalInvoiceId), { status: 'credited', creditedByInvoiceId: cnRef.id });
+      showToast('Creditnota succesvol aangemaakt (placeholder).', 'success');
+      return { ...creditNote, id: cnRef.id };
+    } catch (error) {
+      console.error("Error creating credit note (placeholder):", error);
+      showToast('Fout bij aanmaken creditnota (placeholder).', 'error');
+      return null;
+    }
   };
-  const handleSplitInvoice = async (originalInvoiceId: string, splitType: 'equalParts' | 'byAmount', splitValue: number) => {
-    showToast('Factuur splitsen nog niet geïmplementeerd', 'info');
-    return false;
+  const handleSplitInvoice = async (originalInvoiceId: string, splitType: 'equalParts' | 'byAmount', splitValue: number): Promise<boolean> => {
+    const originalInvoice = invoices.find(inv => inv.id === originalInvoiceId);
+    if (!originalInvoice) {
+      showToast('Originele factuur niet gevonden om te splitsen.', 'error');
+      return false;
+    }
+    if (originalInvoice.status === 'paid' || originalInvoice.status === 'credited') {
+        showToast(`Factuur ${originalInvoice.invoiceNumber} kan niet gesplitst worden omdat deze al betaald of gecrediteerd is.`, 'warning');
+        return false;
+    }
+    // Placeholder: Logica voor splitsen van factuur
+    // Dit is een complexe operatie die nieuwe facturen zou genereren
+    // en de originele factuur zou aanpassen of ongeldig maken.
+    console.log(`Splitting invoice ${originalInvoiceId} by ${splitType} with value ${splitValue}.`);
+    showToast('Factuur splitsen nog niet volledig geïmplementeerd (placeholder).', 'info');
+    // Voor nu, retourneer true om aan te geven dat de actie is ontvangen.
+    // In een echte implementatie zou je hier de nieuwe factuur ID's kunnen retourneren of een status.
+    return false; // Return false as it's not fully implemented
   };
   // App settings
   const handleUpdateDefaultShowAndPackage = (showId?: string, packageId?: string) => {
@@ -350,14 +456,17 @@ const App: React.FC = () => {
       const currentBookedCount = showSlot.bookedCount || 0;
       const requestedGuests = details.guests || 1;
       const slotCapacity = showSlot.capacity || 0;
-      let newStatus: ReservationStatus = 'pending_approval';
+      let newStatus: ReservationStatus = 'pending_approval'; // Default to pending_approval
       let isOverbookingAttempt = false;
 
       if (currentBookedCount + requestedGuests > slotCapacity) {
         isOverbookingAttempt = true;
         // For overbookings, status remains 'pending_approval' for admin to decide.
-        // Admin will need to explicitly approve this.
         showToast('Deze boeking overschrijdt de capaciteit en vereist goedkeuring.', 'warning');
+        // newStatus remains 'pending_approval' as set by default
+      } else {
+        // If not an overbooking, confirm it directly
+        newStatus = 'confirmed';
       }
 
       let bookingObjectForFirebase: any = {
@@ -462,11 +571,10 @@ const App: React.FC = () => {
   
   // --- ADMIN APPROVAL FOR OVERBOOKING ---
   const handleApproveOverbooking = async (bookingId: string) => {
-    const bookingRef = doc(db, 'bookings', bookingId);
-    const bookingDoc = allBookings.find(b => b.reservationId === bookingId); // Assuming reservationId is unique and used as doc ID
+    const bookingDoc = allBookings.find(b => b.id === bookingId); // Use Firestore document ID
 
-    if (!bookingDoc || !bookingDoc.isOverbooking) {
-      showToast('Boeking niet gevonden of geen overboeking.', 'error');
+    if (!bookingDoc) {
+      showToast('Boeking niet gevonden.', 'error');
       return;
     }
 
@@ -477,128 +585,237 @@ const App: React.FC = () => {
     }
 
     try {
+      const bookingRef = doc(db, 'bookings', bookingId);
       // Update booking status to confirmed
       await updateDoc(bookingRef, {
         status: 'confirmed' as ReservationStatus,
-        isOverbooking: false, // Mark as processed
-        internalAdminNotes: `${bookingDoc.internalAdminNotes || ''} (Overboeking goedgekeurd op ${new Date().toLocaleString()})`
+        isOverbooking: false, // Mark as processed if it was an overbooking
+        internalAdminNotes: `${bookingDoc.internalAdminNotes || ''} (Boeking goedgekeurd op ${new Date().toLocaleString()})`
       });
 
-      // Update the show's bookedCount
-      const newBookedCount = (showSlot.bookedCount || 0) + (bookingDoc.guests || 1);
-      await updateDoc(doc(db, 'shows', bookingDoc.showSlotId), {
-        bookedCount: newBookedCount
-      });
+      // Update the show's bookedCount only if it was an overbooking being approved
+      // or if the booking was pending for other reasons but fits now.
+      // The main booking flow already handles non-overbooking count updates.
+      // This approval specifically handles counts for bookings that were initially pending.
+      const currentBookedCount = showSlot.bookedCount || 0;
+      const guestsInBooking = bookingDoc.guests || 1;
+      
+      // Check if approving this booking will exceed capacity AFTER this approval
+      // This logic is crucial: only update count if it was genuinely pending due to capacity or admin review
+      // If it was pending and now fits, or is an approved overbooking, update count.
+      if (bookingDoc.status === 'pending_approval') { // Check original status before update
+        await updateDoc(doc(db, 'shows', bookingDoc.showSlotId), {
+          bookedCount: currentBookedCount + guestsInBooking
+        });
+        setAvailableShowSlots(prev => prev.map(s => s.id === bookingDoc.showSlotId ? {...s, bookedCount: currentBookedCount + guestsInBooking} : s));
+      }
 
-      setAllBookings(prev => prev.map(b => b.reservationId === bookingId ? {...b, status: 'confirmed', isOverbooking: false } : b));
-      setAvailableShowSlots(prev => prev.map(s => s.id === bookingDoc.showSlotId ? {...s, bookedCount: newBookedCount} : s));
-
-      showToast('Overboeking succesvol goedgekeurd en capaciteit bijgewerkt!', 'success');
+      showToast('Boeking succesvol goedgekeurd!', 'success');
     } catch (error) {
-      console.error('Error approving overbooking:', error);
-      showToast('Fout bij goedkeuren overboeking.', 'error');
+      console.error('Error approving booking:', error);
+      showToast('Fout bij goedkeuren boeking.', 'error');
     }
   };
+
+  const handleRejectBooking = async (bookingId: string) => {
+    try {
+      const bookingRef = doc(db, 'bookings', bookingId);
+      await updateDoc(bookingRef, { 
+        status: 'rejected' as ReservationStatus,
+        internalAdminNotes: `Afgekeurd op ${new Date().toLocaleString()}`
+      });
+      // Note: bookedCount is not adjusted here as the booking was never confirmed to take a slot.
+      showToast('Boeking afgewezen.', 'success');
+    } catch (error) {
+      console.error('Error rejecting booking:', error);
+      showToast('Fout bij afwijzen boeking.', 'error');
+    }
+  };
+
+  const handleWaitlistBooking = async (bookingId: string) => {
+    try {
+      const bookingToWaitlist = allBookings.find(b => b.id === bookingId);
+      if (!bookingToWaitlist) {
+        showToast('Boeking niet gevonden om op wachtlijst te plaatsen.', 'error');
+        return;
+      }
+
+      const bookingRef = doc(db, 'bookings', bookingId);
+      await updateDoc(bookingRef, { 
+        status: 'waitlisted' as ReservationStatus,
+        internalAdminNotes: `Verplaatst naar wachtlijst op ${new Date().toLocaleString()}`
+      });
+      
+      // Optionally, add to a separate 'waitingList' collection if not already there
+      // For now, just updating status. A more robust system might move/copy it.
+      // We assume the existing handleAddToWaitingList is for users, this is admin action.
+      // Let's ensure the WaitingListEntry structure is compatible or add a simplified version.
+      const waitingListEntryData: Omit<WaitingListEntry, 'id' | 'creationTimestamp' | 'status' | 'showInfo'> = {
+        showSlotId: bookingToWaitlist.showSlotId,
+        name: bookingToWaitlist.name,
+        email: bookingToWaitlist.email,
+        phone: bookingToWaitlist.phone,
+        guests: bookingToWaitlist.guests,
+        dateAdded: new Date().toISOString(),
+        // customerId: bookingToWaitlist.customerId, // If available and needed
+        // notes: `From rejected booking ${bookingId}`, // Example note
+      };
+      // This re-uses the existing waiting list logic, which might need adjustment
+      // if admin-added entries have different requirements.
+      // For simplicity, we'll assume it's okay for now.
+      await handleAddToWaitingList(waitingListEntryData); 
+
+      showToast('Boeking op wachtlijst geplaatst.', 'success');
+    } catch (error) {
+      console.error('Error moving booking to waitlist:', error);
+      showToast('Fout bij plaatsen op wachtlijst.', 'error');
+    }
+  };
+
 
   // DEFINITION OF THE MISSING FUNCTION
   const handleOpenWaitingListModal = (slotId: string) => {
     setWaitingListModalSlotId(slotId);
     setIsWaitingListModalOpen(true);
   };
+  
+  const handleAddToWaitingList = async (entryData: Omit<WaitingListEntry, 'id' | 'creationTimestamp' | 'status' | 'showInfo'>) => { // dateAdded is now part of entryData
+    try {
+      const showSlot = availableShowSlots.find(s => s.id === entryData.showSlotId);
+      if (!showSlot) {
+        showToast('Kan niet toevoegen: show niet gevonden.', 'error');
+        return false;
+      }
+      const newEntry: Omit<WaitingListEntry, 'id'> = {
+        ...entryData,
+        showInfo: { date: showSlot.date, time: showSlot.time, name: showSlot.name },
+        creationTimestamp: new Date().toISOString(), // Changed from timestamp
+        status: 'pending',
+      };
+      await addDoc(collection(db, 'waitingList'), newEntry);
+      showToast('Succesvol toegevoegd aan de wachtlijst!', 'success');
+      setIsWaitingListModalOpen(false);
+      return true;
+    } catch (error) {
+      console.error('Error adding to waiting list:', error);
+      showToast('Fout bij toevoegen aan wachtlijst.', 'error');
+      return false;
+    }
+  };
+
 
   // --- RENDER LOGIC ---
-  let pageContent;
-  if (view === 'admin') {
-    pageContent = <AdminPage
-      availableShowSlots={availableShowSlots}
-      allBookings={allBookings}
-      pendingApprovalBookings={allBookings.filter(b => b.status === 'pending_approval')}
-      onInitiateBookingApproval={() => {}}
-      onRejectPendingBooking={() => {}}
-      onWaitlistPendingBooking={() => {}}
-      onAddShowSlot={handleAddShowSlot}
-      onRemoveShowSlot={handleRemoveShowSlot}
-      onUpdateShowSlot={handleUpdateShowSlot}
-      allPackages={SHOW_PACKAGES}
-      specialAddons={SPECIAL_ADDONS}
-      merchandiseItems={merchandiseItems}
-      onAddMerchandise={handleAddMerchandise}
-      onUpdateMerchandise={handleUpdateMerchandise}
-      onDeleteMerchandise={handleDeleteMerchandise}
-      onManualBookingSubmit={handleManualBookingSubmit}
-      onUpdateBooking={handleUpdateBooking}
-      bookingStats={{week: {count: 0, guests: 0}, month: {count: 0, guests: 0}, year: {count: 0, guests: 0}}}
-      waitingListEntries={waitingListEntries}
-      removeWaitingListEntry={handleRemoveWaitingListEntry}
-      onNavigateToUserView={() => setView('user')}
-      onBookFromWaitingListModalOpen={() => {}}
-      customers={customers}
-      onAddCustomer={handleAddCustomer}
-      onUpdateCustomer={handleUpdateCustomer}
-      onDeleteCustomer={handleDeleteCustomer}
-      showToast={showToast}
-      promoCodes={promoCodes}
-      onAddPromoCode={handleAddPromoCode}
-      onUpdatePromoCode={handleUpdatePromoCode}
-      onDeletePromoCode={handleDeletePromoCode}
-      applyPromoCode={applyPromoCode}
-      auditLogs={auditLogs}
-      invoices={invoices}
-      onGenerateInvoice={handleGenerateInvoice}
-      onUpdateInvoiceStatus={handleUpdateInvoiceStatus}
-      onGenerateInvoicesForDay={handleGenerateInvoicesForDay}
-      onCreateCreditNote={handleCreateCreditNote}
-      onSplitInvoice={handleSplitInvoice}
-      staffMembers={staffMembers}
-      scheduledShifts={scheduledShifts}
-      onAddStaffMember={handleAddStaffMember}
-      onUpdateStaffMember={handleUpdateStaffMember}
-      onDeleteStaffMember={handleDeleteStaffMember}
-      onScheduleStaff={handleScheduleStaff}
-      onUnscheduleStaff={handleUnscheduleStaff}
-      appSettings={appSettings}
-      onUpdateDefaultShowAndPackage={handleUpdateDefaultShowAndPackage}
-      onApproveOverbooking={handleApproveOverbooking} // Pass the new handler
-    />;
-  } else {
-    pageContent = <UserBookingPage
-      availableShowSlots={availableShowSlots}
-      onBookShow={handleBookShow}
-      allPackages={SHOW_PACKAGES}
-      onNavigateToAdminView={() => setView('admin')}
-      onNavigateToUserAccountView={() => {}}
-    />;
-  }
-
   return (
     <>
-      <div style={{position: 'fixed', top: 10, right: 10, zIndex: 1000}}>
-        {view === 'admin' ? (
-          <button onClick={() => setView('user')} className="px-4 py-2 bg-blue-600 text-white rounded">Verlaat Admin</button>
-        ) : (
-          <button onClick={() => setView('admin')} className="px-4 py-2 bg-green-600 text-white rounded">Admin</button>
-        )}
-      </div>
       <ToastContainer toasts={toasts} removeToast={removeToast} />
-      {pageContent}
-      
-      {/* BookingStepper Modal */}
-      <BookingStepper
-        isOpen={isBookingStepperOpen}
-        onClose={() => setIsBookingStepperOpen(false)}
-        onSubmit={handleBookingSubmit}
-        allPackages={SHOW_PACKAGES}
-        specialAddons={SPECIAL_ADDONS} // Pass SPECIAL_ADDONS
-        availableShowSlots={availableShowSlots}
-        merchandiseItems={merchandiseItems}
-        initialData={initialBookingData}
-        onOpenWaitingListModal={handleOpenWaitingListModal}
-        applyPromoCode={applyPromoCode} // Pass de echte applyPromoCode functie
-        loggedInCustomer={null} // Voor nu null, later te implementeren
-        onLogout={() => { showToast("Uitgelogd (placeholder)", "info"); /* Implementeer echte logout */ }}
-        showInfoModal={(_title, message, status) => showToast(message as string, status || 'info')} // Aangepast om ReactNode te accepteren
-      />
-      
+      {view === 'admin' && (
+        <AdminPage
+          availableShowSlots={availableShowSlots}
+          allBookings={allBookings}
+          // pendingApprovalBookings wordt nu afgeleid in AdminPage zelf
+          onAddShowSlot={handleAddShowSlot}
+          onRemoveShowSlot={handleRemoveShowSlot}
+          onUpdateShowSlot={handleUpdateShowSlot}
+          allPackages={SHOW_PACKAGES}
+          specialAddons={SPECIAL_ADDONS}
+          merchandiseItems={merchandiseItems}
+          onAddMerchandise={handleAddMerchandise}
+          onUpdateMerchandise={handleUpdateMerchandise}
+          onDeleteMerchandise={handleDeleteMerchandise}
+          onManualBookingSubmit={handleManualBookingSubmit}
+          onUpdateBooking={handleUpdateBooking}
+          bookingStats={{
+            week: { count: 0, guests: 0 }, // Placeholder data
+            month: { count: 0, guests: 0 }, // Placeholder data
+            year: { count: 0, guests: 0 }    // Placeholder data
+          }}
+          waitingListEntries={waitingListEntries}
+          onRemoveWaitingListEntry={handleRemoveWaitingListEntry} // This prop name is correct as per AdminPageProps definition in AdminPage.tsx
+          onNavigateToUserView={() => setView('user')}
+          onBookFromWaitingListModalOpen={(entry: WaitingListEntry) => { // Added type for entry
+            console.log('Attempting to book from waiting list for:', entry);
+            setInitialBookingData({
+              selectedShowSlotId: entry.showSlotId,
+              name: entry.name,
+              email: entry.email,
+              phone: entry.phone,
+              guests: entry.guests,
+            });
+            setIsBookingStepperOpen(true);
+            showToast('Boekingsformulier geopend voor wachtlijstitem.', 'info');
+          }}
+          customers={customers}
+          onAddCustomer={handleAddCustomer}
+          onUpdateCustomer={handleUpdateCustomer} // Corrected typo
+          onDeleteCustomer={handleDeleteCustomer}
+          showToast={showToast}
+          promoCodes={promoCodes}
+          onAddPromoCode={handleAddPromoCode}
+          onUpdatePromoCode={handleUpdatePromoCode}
+          onDeletePromoCode={handleDeletePromoCode}
+          applyPromoCode={applyPromoCode}
+          auditLogs={auditLogs}
+          invoices={invoices}
+          onGenerateInvoice={handleGenerateInvoice}
+          onUpdateInvoiceStatus={handleUpdateInvoiceStatus}
+          onGenerateInvoicesForDay={handleGenerateInvoicesForDay}
+          onCreateCreditNote={handleCreateCreditNote}
+          onSplitInvoice={handleSplitInvoice}
+          staffMembers={staffMembers}
+          scheduledShifts={scheduledShifts}
+          onAddStaffMember={handleAddStaffMember}
+          onUpdateStaffMember={handleUpdateStaffMember}
+          onDeleteStaffMember={handleDeleteStaffMember}
+          onScheduleStaff={handleScheduleStaff}
+          onUnscheduleStaff={handleUnscheduleStaff}
+          onApproveOverbooking={handleApproveOverbooking}
+          appSettings={appSettings}
+          onUpdateDefaultShowAndPackage={handleUpdateDefaultShowAndPackage}
+        />
+      )}
+      {view === 'user' && (
+        <UserBookingPage
+          availableShowSlots={availableShowSlots}
+          onBookShow={handleBookShow}
+          onOpenWaitingListModal={handleOpenWaitingListModal} // This prop name is correct as per UserBookingPageProps definition in UserBookingPage.tsx
+          merchandiseItems={merchandiseItems}
+          allPackages={SHOW_PACKAGES}
+          appSettings={appSettings}
+          // Add the missing props that UserBookingPage expects, if any, or adjust UserBookingPageProps
+          onNavigateToAdminView={() => setView('admin')} // Assuming this is the intended navigation
+          onNavigateToUserAccountView={() => { console.log('Navigate to user account - not implemented'); showToast('Gebruikersaccount nog niet beschikbaar', 'info');}} // Placeholder
+        />
+      )}
+
+      {isBookingStepperOpen && (
+        <BookingStepper
+          isOpen={isBookingStepperOpen}
+          onClose={() => setIsBookingStepperOpen(false)}
+          onSubmit={handleBookingSubmit}
+          availableShowSlots={availableShowSlots}
+          merchandiseItems={merchandiseItems}
+          promoCodes={promoCodes}
+          applyPromoCode={applyPromoCode}
+          showPackages={SHOW_PACKAGES}
+          specialAddons={SPECIAL_ADDONS}
+          initialData={initialBookingData}
+          appSettings={appSettings}
+          loggedInCustomer={null}
+          onOpenWaitingListModal={handleOpenWaitingListModal}
+          showInfoModal={(_title, message, status) => showToast(message as string, status || 'info')} // Mark title as unused
+        />
+      )}
+
+      {isWaitingListModalOpen && waitingListModalSlotId && (
+        <WaitingListModal
+          isOpen={isWaitingListModalOpen}
+          onClose={() => setIsWaitingListModalOpen(false)}
+          onSubmit={handleAddToWaitingList} // Gebruik de gecorrigeerde handler
+          showSlotId={waitingListModalSlotId}
+          showSlotInfo={availableShowSlots.find(s => s.id === waitingListModalSlotId) || undefined}
+        />
+      )}
+
       {/* Booking Confirmation Modal */}
       {confirmationData && (
         <BookingConfirmationModal
@@ -617,39 +834,6 @@ const App: React.FC = () => {
           guests={confirmationData.guests}
         />
       )}
-
-      <WaitingListModal
-        isOpen={isWaitingListModalOpen}
-        onClose={() => setIsWaitingListModalOpen(false)}
-        showSlotId={waitingListModalSlotId || ''} // Pass empty string if null to satisfy type, or adjust type in props
-        onSubmit={async (data) => { // Changed from onSubmitWaitingList to onSubmit, and ensure data type is correct
-          if (!data.showSlotId) { // data now directly contains showSlotId from the form
-            showToast('Kan niet toevoegen aan wachtlijst: show ID mist.', 'error');
-            return {success: false};
-          }
-          const entry: Omit<WaitingListEntry, 'id' | 'timestamp' | 'showInfo' | 'dateAdded' | 'status'> & { timestamp: string, status: WaitingListEntry['status'] } = {
-            showSlotId: data.showSlotId,
-            name: data.name,
-            email: data.email,
-            phone: data.phone,
-            guests: data.guests,
-            timestamp: new Date().toISOString(),
-            status: 'pending',
-            // customerId and notes can be added if form supports them
-          };
-          try {
-            await addDoc(collection(db, 'waitingList'), entry);
-            showToast('Succesvol toegevoegd aan de wachtlijst!', 'success');
-            setIsWaitingListModalOpen(false);
-            return {success: true};
-          } catch (error) {
-            console.error("Error adding to waiting list:", error);
-            showToast('Fout bij toevoegen aan wachtlijst.', 'error');
-            return {success: false};
-          }
-        }}
-        showSlotInfo={availableShowSlots.find(s => s.id === waitingListModalSlotId) || undefined}
-      />
     </>
   );
 };
