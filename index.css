@@ -1,0 +1,302 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-accent-gold: #F59E0B; /* amber-500 */
+  --color-accent-crimson: #B91C1C; /* red-700 */
+  --color-primary-indigo: #4f46e5; /* indigo-600 */
+  --color-primary-indigo-darker: #4338ca; /* indigo-700 */
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--color-slate-100);
+  color: var(--color-slate-700);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-slate-200);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-primary-indigo);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-indigo-darker);
+}
+
+*:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  border-radius: 6px; 
+  box-shadow: 0 0 0 2px var(--color-slate-100), 0 0 0 4px var(--color-primary-indigo);
+}
+
+.btn-primary {
+  background-color: #4f46e5;
+  color: white;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.btn-primary:hover {
+  background-color: #4338ca;
+}
+
+.btn-secondary {
+  background-color: white;
+  color: #334155;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  border: 1px solid #cbd5e1;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.btn-secondary:hover {
+  background-color: #f9fafb;
+}
+
+.btn-danger {
+  background-color: #b91c1c;
+  color: white;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.btn-danger:hover {
+  background-color: #991b1b;
+}
+
+.input-primary {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.input-primary:focus {
+  border-color: #4f46e5;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+}
+
+.card {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  border: 1px solid #e2e8f0;
+}
+
+.card-header {
+  padding: 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.card-body {
+  padding: 1.5rem;
+}
+
+/* Additional custom styles */
+@supports not (outline-style: auto) {
+  *:focus-visible {
+    outline: 2px solid var(--color-primary-indigo);
+  }
+}
+
+.font-display { 
+  font-family: 'Roboto Slab', serif; 
+  font-weight: 700; /* Default bold */
+}
+.font-display-black {
+  font-family: 'Roboto Slab', serif;
+  font-weight: 900; /* Extra bold for main titles */
+}
+
+.scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar::-webkit-scrollbar-track {
+  background: var(--color-slate-300);
+}
+.scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-primary-indigo);
+  border-radius: 3px;
+}
+.scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-indigo-darker);
+}
+
+/* Custom toast container styling */
+.toast-container {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 1050; /* Ensure toasts are on top of other modals */
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem; /* space between toasts */
+}
+
+.toast {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 250px;
+  max-width: 350px;
+  opacity: 0;
+  transform: translateX(100%);
+  animation: slideInRight 0.3s forwards, fadeOut 0.3s 4.7s forwards;
+}
+
+.toast-success {
+  background-color: #D1FAE5; /* green-100 */
+  color: #065F46; /* green-800 */
+  border-left: 4px solid #059669; /* green-600 */
+}
+.toast-error {
+  background-color: #FEE2E2; /* red-100 */
+  color: #991B1B; /* red-800 */
+  border-left: 4px solid #DC2626; /* red-600 */
+}
+.toast-info {
+  background-color: #DBEAFE; /* blue-100 */
+  color: #1E40AF; /* blue-800 */
+  border-left: 4px solid #2563EB; /* blue-600 */
+}
+.toast-warning {
+  background-color: #FEF3C7; /* amber-100 */
+  color: #92400E; /* amber-800 */
+  border-left: 4px solid #F59E0B; /* amber-500 */
+}
+
+.toast-close-button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.toast-close-button:hover {
+  opacity: 1;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; transform: translateX(100%); }
+}
+
+/* Print-specific styles for invoices and other printable content */
+@media print {
+  body {
+    background-color: #fff !important;
+    color: #000 !important;
+    font-size: 10pt !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important; 
+    print-color-adjust: exact !important;
+  }
+  .no-print, .no-print *, nav, header:not(.printable-invoice-container header):not(.printable-content header), footer:not(.printable-invoice-container footer):not(.printable-content footer) {
+    display: none !important;
+  }
+  .printable-invoice-container, .printable-content {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 1cm !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    font-size: 9pt !important;
+  }
+  .invoice-table, .print-table { /* Applied to both for consistency */
+    width: 100% !important;
+    border-collapse: collapse !important;
+    border: 1px solid #ccc !important;
+    padding: 4px 6px !important;
+    text-align: left !important;
+    word-break: break-word !important;
+    font-size: 8pt !important;
+  }
+  .invoice-table th, .print-table th {
+    background-color: #f0f0f0 !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact !important; 
+    print-color-adjust: exact !important;
+  }
+  /* Ensure text colors within the printable areas are black */
+  .printable-invoice-container, .printable-invoice-container *,
+  .printable-content, .printable-content * {
+    color: #000 !important;
+  }
+
+  /* Attempt to prevent page breaks inside table rows or important sections */
+  tr, .invoice-section, div.invoice-section /* More specific for DailyPrintout structure */ {
+    page-break-inside: avoid !important;
+  }
+  thead {
+    display: table-header-group !important; /* Repeat headers on each page */
+  }
+  .page-break-before {
+    page-break-before: always !important;
+  }
+  a {
+    text-decoration: none !important;
+    color: inherit !important;
+  }
+  /* Hide app specific scrollbars etc */
+  .scrollbar, .scrollbar * {
+    scrollbar-width: none !important; /* Firefox */
+  }
+  .scrollbar::-webkit-scrollbar, .scrollbar *::-webkit-scrollbar {
+    display: none !important; /* Chrome, Safari, Opera */
+  }
+
+  /* Styling for DailyPrintout specifics */
+  .printable-content h1 { font-size: 16pt; text-align: center; margin-bottom: 5px; }
+  .printable-content h2 { font-size: 12pt; text-align: center; margin-bottom: 10px; }
+  .printable-content h3 { font-size: 11pt; text-align: left; margin-top: 15px; border-bottom: 1px solid #999; margin-bottom: 5px; }
+  .printable-content .invoice-table td, .printable-content .invoice-table th {
+    vertical-align: top;
+  }
+  .printable-content .booking-name-note {font-size: 7pt; color: #333; font-style: italic;}
+  .printable-content .mpl-yes { font-weight: bold; color: #581c87 !important; /* purple-800 */ }
+  .printable-content .placement-details { color: #7e22ce !important; /* purple-600 */ }
+  .printable-content .admin-notes { color: #15803d !important; /* green-700 */ }
+  .printable-content .dietary { color: #c2410c !important; /* orange-700 */ font-weight: bold; }
+  .printable-content .extras-info { color: #0369a1 !important; /* sky-700 */ }
+  .printable-content .invoice-info { font-style: italic; color: #44403c !important; /* stone-700 */ }
+  .printable-content .paid-status-yes { color: #166534 !important; /* green-800 */ font-weight: bold; }
+  .printable-content .paid-status-no { color: #b91c1c !important; /* red-700 */ font-weight: bold; }
+}
