@@ -155,7 +155,7 @@ export interface ReservationDetails {
   status: ReservationStatus;
   isMPL?: boolean;
   placementPreferenceDetails?: string;
-  internalAdminNotes?: string; // Keep for now, clarify if it's different from internalNotes
+  internalAdminNotes?: string; // Keep for now, clarify if it\'s different from internalNotes
   isOverbooking?: boolean; 
   isGuestBooking?: boolean; // Added to distinguish guest bookings
   notes?: string; 
@@ -167,6 +167,15 @@ export interface ReservationDetails {
   acceptsMarketingEmails?: boolean;
   agreedToPrivacyPolicy: boolean;
   cancellationReason?: string;
+  cancelledBy?: 'user' | 'admin'; // Added
+  cancellationTimestamp?: string; // Added
+  rescheduleHistory?: Array<{
+    oldShowSlotId: string;
+    newShowSlotId: string;
+    rescheduledBy: 'user' | 'admin';
+    timestamp: string;
+    reason?: string; 
+  }>; // Added for reschedule tracking
   paymentDetails?: {
     method: string;
     transactionId?: string;
@@ -207,19 +216,20 @@ export interface BookingData {
 
 // Added missing types
 export interface WaitingListEntry {
-  id: string;
+  id: string; // Firestore document ID
   showSlotId: string;
-  showInfo: { date: string; time: string; name?: string }; // Added name to showInfo
   name: string;
   email: string;
-  phone: string; // Added
-  guests: number; // Added
-  packageId?: string; // Added
-  packageName?: string; // Added
-  notes?: string; // Added
-  creationTimestamp: string; // Added
-  dateAdded: string; // <<< ADDED
-  status: 'pending' | 'contacted' | 'booked' | 'cancelled'; // Added
+  phone: string;
+  guests: number;
+  notes?: string;
+  timestamp: string; // ISO string of when the entry was created
+  status: 'pending' | 'booked' | 'cancelled'; // Status of the waiting list request
+  showInfo: { // Snapshot of show details at the time of joining waitlist
+    date: string;
+    time: string;
+    name?: string; // Optional: name of the show/event if available
+  };
 }
 
 export interface AuditLogEntry {

@@ -12,10 +12,10 @@ interface ManualBookingFormProps {
 }
 
 export const ManualBookingForm: React.FC<ManualBookingFormProps> = ({
-  availableShowSlots,
-  allPackages,
+  availableShowSlots, // Corrected: was showSlots
+  allPackages, // Corrected: was packages
   specialAddons,
-  merchandiseItems,
+  merchandiseItems, // Corrected: was merchandise
   onSubmit,
   applyPromoCode,
 }) => {

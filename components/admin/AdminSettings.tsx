@@ -1,12 +1,12 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { AppSettings, ShowSlot, PackageOption } from '../../types';
 import type { ToastMessage } from '../shared/ToastNotifications';
 
-interface AdminSettingsProps {
+export interface AdminSettingsProps {
   appSettings: AppSettings;
   availableShowSlots: ShowSlot[];
   allPackages: PackageOption[];
+  onUpdateAppSettings: (updatedSettings: Partial<AppSettings>) => void; // Added onUpdateAppSettings
   onUpdateDefaultShowAndPackage: (showId?: string, packageId?: string) => void;
   showToast: (message: string, type: ToastMessage['type']) => void;
 }
@@ -15,16 +15,19 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   appSettings,
   availableShowSlots,
   allPackages,
+  onUpdateAppSettings, // Added onUpdateAppSettings
   onUpdateDefaultShowAndPackage,
   showToast,
 }) => {
   const [selectedDefaultShowId, setSelectedDefaultShowId] = useState<string>(appSettings.defaultShowId || '');
   const [selectedDefaultPackageId, setSelectedDefaultPackageId] = useState<string>(appSettings.defaultPackageId || '');
+  const [localSettings, setLocalSettings] = useState<Partial<AppSettings>>(appSettings); // For other settings
 
   useEffect(() => {
     setSelectedDefaultShowId(appSettings.defaultShowId || '');
     setSelectedDefaultPackageId(appSettings.defaultPackageId || '');
-  }, [appSettings.defaultShowId, appSettings.defaultPackageId]);
+    setLocalSettings(appSettings); // Sync local settings when appSettings prop changes
+  }, [appSettings]);
 
   const futureOpenShowSlots = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -71,6 +74,35 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     onUpdateDefaultShowAndPackage(undefined, undefined);
   };
 
+  const handleSettingsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value, type } = e.target;
+    const checked = (e.target as HTMLInputElement).checked;
+    const numValue = parseFloat(value);
+
+    setLocalSettings(prev => {
+        const keys = name.split('.');
+        if (keys.length === 2) { // Nested property like companyDetails.name
+            return {
+                ...prev,
+                [keys[0]]: {
+                    ...(prev as any)[keys[0]],
+                    [keys[1]]: type === 'checkbox' ? checked : (type === 'number' ? numValue : value)
+                }
+            };
+        }
+        return {
+            ...prev,
+            [name]: type === 'checkbox' ? checked : (type === 'number' ? numValue : value)
+        };
+    });
+  };
+
+  const handleSaveAllSettings = () => {
+    onUpdateAppSettings(localSettings);
+    // Default show/package is saved separately by its own button
+    // showToast('Alle instellingen opgeslagen!', 'success'); // App.tsx will show toast
+  };
+
   const currentDefaultShow = appSettings.defaultShowId ? availableShowSlots.find(s => s.id === appSettings.defaultShowId) : null;
   const currentDefaultPackage = appSettings.defaultPackageId ? allPackages.find(p => p.id === appSettings.defaultPackageId) : null;
 
@@ -92,7 +124,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     <p><strong>Show:</strong> {new Date(currentDefaultShow.date + "T00:00:00").toLocaleDateString('nl-NL', {weekday: 'long', day: 'numeric', month: 'long'})} om {currentDefaultShow.time}</p>
                 ) : <p>Geen standaard show ingesteld.</p>}
                 {currentDefaultPackage ? (
-                    <p><strong>Arrangement:</strong> {currentDefaultPackage.name} (€{currentDefaultPackage.price.toFixed(2)})</p>
+                    <p><strong>Arrangement:</strong> {currentDefaultPackage.name} (€{currentDefaultPackage.price?.toFixed(2) || 'N/A'})</p>
                 ) : <p>Geen standaard arrangement ingesteld.</p>}
                  {(currentDefaultShow && new Date(currentDefaultShow.date + 'T' + currentDefaultShow.time) < new Date()) && 
                     <p className="text-orange-600 text-xs mt-1">Let op: de huidige standaard show is in het verleden.</p>
@@ -138,7 +170,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               <option value="">-- Geen Standaard Arrangement --</option>
               {packagesAvailableForSelectedDefaultShow.map(pkg => (
                 <option key={pkg.id} value={pkg.id}>
-                  {pkg.name} - €{pkg.price.toFixed(2)}
+                  {pkg.name} - €{pkg.price?.toFixed(2) || 'N/A'}
                 </option>
               ))}
             </select>
@@ -163,13 +195,42 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </div>
       </section>
 
-      <section className="mt-8">
-        <h3 className="text-xl font-semibold text-slate-700 mb-3">Andere Instellingen</h3>
-        <p className="text-sm text-slate-500 italic">
-          Hier kunnen in de toekomst andere algemene applicatie-instellingen beheerd worden, zoals BTW-tarieven, factuurprefixen, etc. Momenteel zijn deze hardcoded of via client-side fallbacks geregeld.
-        </p>
+      <section className="mb-8 p-4 border border-teal-200 rounded-lg bg-teal-50 shadow-sm">
+        <h3 className="text-xl font-semibold text-teal-700 mb-4">Bedrijfsgegevens & Facturatie</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <div>
+                <label htmlFor="companyDetails.name" className="block text-sm font-medium text-slate-700">Bedrijfsnaam</label>
+                <input type="text" name="companyDetails.name" id="companyDetails.name" value={localSettings.companyDetails?.name || ''} onChange={handleSettingsChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2" />
+            </div>
+            {/* Add more fields for companyDetails, lastInvoiceNumber, invoiceDueDays, etc. similar to above */}
+            <div>
+                <label htmlFor="invoiceNrPrefix" className="block text-sm font-medium text-slate-700">Factuurnummer Prefix</label>
+                <input type="text" name="invoiceNrPrefix" id="invoiceNrPrefix" value={localSettings.invoiceNrPrefix || ''} onChange={handleSettingsChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2" />
+            </div>
+             <div>
+                <label htmlFor="vatRateHigh" className="block text-sm font-medium text-slate-700">BTW Tarief Hoog (%)</label>
+                <input type="number" name="vatRateHigh" id="vatRateHigh" value={localSettings.vatRateHigh || 0} onChange={handleSettingsChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2" />
+            </div>
+            <div>
+                <label htmlFor="vatRateLow" className="block text-sm font-medium text-slate-700">BTW Tarief Laag (%)</label>
+                <input type="number" name="vatRateLow" id="vatRateLow" value={localSettings.vatRateLow || 0} onChange={handleSettingsChange} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2" />
+            </div>
+            <div className="md:col-span-2">
+                <label htmlFor="paymentInstructions" className="block text-sm font-medium text-slate-700">Betalingsinstructies (voor facturen)</label>
+                <textarea name="paymentInstructions" id="paymentInstructions" value={localSettings.paymentInstructions || ''} onChange={handleSettingsChange} rows={3} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2"></textarea>
+            </div>
+        </div>
       </section>
 
+      <div className="mt-8 flex justify-end space-x-3">
+        <button 
+            type="button" 
+            onClick={handleSaveAllSettings} 
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-6 rounded-lg text-sm transition-colors shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+        >
+            Alle Instellingen Opslaan
+        </button>
+      </div>
     </div>
   );
 };

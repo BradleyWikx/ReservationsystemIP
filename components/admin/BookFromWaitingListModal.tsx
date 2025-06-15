@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { WaitingListEntry, ShowSlot, PackageOption } from '../../types';
 
@@ -8,7 +7,7 @@ interface BookFromWaitingListModalProps {
   waitingListEntry: WaitingListEntry;
   showSlot?: ShowSlot;
   allPackages: PackageOption[];
-  onSubmit: (waitingListEntryId: string, packageId: string) => Promise<boolean>; // Changed to Promise<boolean>
+  onSubmit: (waitingListEntryId: string, packageId: string) => Promise<boolean>; // onSubmit now takes waitingListEntryId and packageId
 }
 
 const CloseIconSvg = () => (
@@ -56,13 +55,14 @@ export const BookFromWaitingListModal: React.FC<BookFromWaitingListModalProps> =
         return;
     }
     try {
+        // Pass waitingListEntry.id and selectedPackageId to the onSubmit prop
         const success = await onSubmit(waitingListEntry.id, selectedPackageId);
-        if (!success) {
-            // App.tsx should handle specific alerts.
-            // This modal can show a generic error if needed, but often App.tsx handles it.
-            // setError('Kon boeking niet verwerken. Controleer capaciteit of show status (indien niet geannuleerd).');
+        if (success) {
+            // App.tsx handles closing the modal and showing success toast
+        } else {
+            // App.tsx should show an error toast. setError can be used for modal-specific errors if needed.
+            // setError('Kon boeking niet verwerken. Controleer capaciteit of show status.');
         }
-        // If successful, App.tsx should close the modal and show a success alert.
     } catch (err) {
         console.error("Error submitting booking from waiting list:", err);
         setError('Er is een onverwachte fout opgetreden bij het verwerken van de boeking.');
@@ -121,7 +121,7 @@ export const BookFromWaitingListModal: React.FC<BookFromWaitingListModalProps> =
               ) : (
                 packagesForSlot.map((pkg) => (
                   <option key={pkg.id} value={pkg.id}>
-                    {pkg.name} - €{pkg.price.toFixed(2)}
+                    {pkg.name} - €{(pkg.price || 0).toFixed(2)} {/* Handle potentially undefined price */}
                   </option>
                 ))
               )}

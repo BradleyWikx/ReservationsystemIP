@@ -6,12 +6,12 @@ import { SHOW_TYPE_COLORS } from '../../constants';
 interface ShowManagementProps {
   availableShowSlots: ShowSlot[];
   onAddShowSlot: (newSlotData: Omit<ShowSlot, 'id' | 'bookedCount' | 'availableSlots' | 'isManuallyClosed'>) => void; // Corrected type
-  onRemoveShowSlot: (slotId: string) => Promise<void>; 
+  onDeleteShowSlot: (slotId: string) => Promise<void>; // Corrected name
   onUpdateShowSlot: (slot: ShowSlot) => void;
+  onToggleManualClose: (slotId: string, isClosed: boolean) => Promise<void>; // Added
   allPackages: PackageOption[];
   waitingListEntries: WaitingListEntry[];
-  // appSettings: AppSettings; // Removed appSettings
-  // showToast: (message: string, type: 'success' | 'error' | 'info' | 'warning') => void; // Removed, not used
+  showToast: (message: string, type: 'success' | 'error' | 'info' | 'warning') => void; // Added
 }
 
 const DEFAULT_CAPACITY = 250;
@@ -28,12 +28,12 @@ const CloseIcon = () => (
 export const ShowManagement: React.FC<ShowManagementProps> = ({
   availableShowSlots,
   onAddShowSlot,
-  onRemoveShowSlot,
+  onDeleteShowSlot, // Corrected name
   onUpdateShowSlot,
+  onToggleManualClose, // Added
   allPackages,
   waitingListEntries,
-  // appSettings, // Removed
-  // showToast, // Removed
+  showToast, // Added
 }) => {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,13 +46,21 @@ export const ShowManagement: React.FC<ShowManagementProps> = ({
   const [formIsManuallyClosed, setFormIsManuallyClosed] = useState<boolean>(false);
   const [formShowType, setFormShowType] = useState<ShowType>(ShowType.REGULAR);
   const [formError, setFormError] = useState<string>('');
+  const [showTypeFilter, setShowTypeFilter] = useState<ShowType | 'all'>('all'); // Added for filtering
 
-  const showsForSelectedDate = useMemo(() => {
+  const showsForSelectedDateRaw = useMemo(() => {
     if (!selectedDate) return [];
     return availableShowSlots
       .filter(slot => slot.date === selectedDate)
       .sort((a,b) => a.time.localeCompare(b.time));
   }, [selectedDate, availableShowSlots]);
+
+  const showsForSelectedDate = useMemo(() => {
+    if (showTypeFilter === 'all') {
+      return showsForSelectedDateRaw;
+    }
+    return showsForSelectedDateRaw.filter(slot => slot.showType === showTypeFilter);
+  }, [showsForSelectedDateRaw, showTypeFilter]);
 
   // Effect to auto-set time to 14:00 if Matinee is selected in the form
   useEffect(() => {
@@ -112,53 +120,112 @@ export const ShowManagement: React.FC<ShowManagementProps> = ({
     );
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleFormSubmit = async () => {
     setFormError('');
-    if (!formDate || !formTime || formSelectedPackageIds.length === 0 || formCapacity <= 0) {
-      setFormError('Datum, tijd, capaciteit (>0) en minstens één arrangement zijn verplicht.');
+    if (!formDate || !formTime || formCapacity <= 0 || formSelectedPackageIds.length === 0) {
+      setFormError('Vul alle verplichte velden in (Datum, Tijd, Capaciteit > 0, minstens één Arrangement).');
       return;
     }
 
-    const today = new Date(); today.setHours(0,0,0,0);
-    if (!editingSlot && new Date(formDate + 'T00:00:00') < today) {
-        setFormError('Kan geen show in het verleden toevoegen.');
-        return;
-    }
-
-    let finalTime = formTime;
-    if (formShowType === ShowType.MATINEE) {
-      finalTime = "14:00";
-    }
-
-    if (!editingSlot || (editingSlot && (editingSlot.date !== formDate || editingSlot.time !== finalTime))) {
-      if (availableShowSlots.some(s => s.id !== editingSlot?.id && s.date === formDate && s.time === finalTime)) {
-        setFormError('Er bestaat al een show op deze datum en tijd.');
-        return;
-      }
-    }
-
     const slotData = {
+      name: `Show ${formDate} ${formTime}`,
       date: formDate,
-      time: finalTime,
+      time: formTime,
       capacity: formCapacity,
       availablePackageIds: formSelectedPackageIds,
       isManuallyClosed: formIsManuallyClosed,
       showType: formShowType,
-      // availableSlots will be set in App.tsx based on capacity
-      // bookedCount will be initialized to 0 in App.tsx
+      // bookedCount and availableSlots will be set by the backend or parent handler
     };
 
-    if (editingSlot) {
-      onUpdateShowSlot({ ...editingSlot, ...slotData });
-    } else {
-      onAddShowSlot(slotData);
+    try {
+      if (editingSlot) {
+        onUpdateShowSlot({ ...editingSlot, ...slotData });
+        showToast('Show succesvol bijgewerkt!', 'success');
+      } else {
+        // Explicitly cast to the type expected by onAddShowSlot
+        onAddShowSlot(slotData as Omit<ShowSlot, 'id' | 'bookedCount' | 'availableSlots' | 'isManuallyClosed'>);
+        showToast('Show succesvol toegevoegd!', 'success');
+      }
+      setIsModalOpen(false);
+    } catch (error) {
+      console.error("Error saving show slot:", error);
+      setFormError('Fout bij opslaan van de show. Probeer het opnieuw.');
+      showToast('Fout bij opslaan van de show.', 'error');
     }
-    closeModal();
   };
 
-  const handleToggleCloseShow = (slot: ShowSlot) => {
-    onUpdateShowSlot({ ...slot, isManuallyClosed: !slot.isManuallyClosed });
+  const handleDeleteShow = async (slotId: string) => {
+    if (window.confirm('Weet u zeker dat u deze show wilt verwijderen? Dit kan niet ongedaan worden gemaakt.')) {
+      try {
+        await onDeleteShowSlot(slotId); // Use corrected prop name
+        showToast('Show succesvol verwijderd!', 'success');
+        if (editingSlot?.id === slotId) {
+          setIsModalOpen(false); // Close modal if the edited show is deleted
+        }
+      } catch (error) {
+        console.error("Error deleting show slot:", error);
+        showToast('Fout bij verwijderen van de show.', 'error');
+      }
+    }
+  };
+
+  const handleToggleClose = async (slot: ShowSlot) => {
+    try {
+      await onToggleManualClose(slot.id, !slot.isManuallyClosed);
+      // showToast will be called by App.tsx after successful update
+    } catch (error) {
+      console.error("Error toggling manual close state:", error);
+      showToast('Fout bij het wijzigen van de sluitingsstatus.', 'error');
+    }
+  };
+
+
+  const renderShowCard = (slot: ShowSlot) => {
+    const waitingCount = waitingListEntries.filter(w => w.showSlotId === slot.id).length;
+    return (
+      <div key={slot.id} className={`p-3 rounded-md shadow-sm border ${slot.isManuallyClosed ? 'bg-red-100 border-red-300 opacity-80' : 'bg-white border-slate-200'}`}>
+        <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
+          <div className="flex-grow">
+            <p className={`font-semibold ${slot.isManuallyClosed ? 'text-red-700 line-through' : 'text-slate-800'}`}>
+              {slot.time} - {slot.showType || 'REGULAR'}
+              <span className="ml-2 inline-block w-3 h-3 rounded-full" style={{backgroundColor: SHOW_TYPE_COLORS[slot.showType || ShowType.REGULAR]}}></span>
+            </p>
+            <p className="text-xs text-slate-500">Capaciteit: {slot.bookedCount}/{slot.capacity}
+               {waitingCount > 0 && <span className="text-yellow-600 ml-2">({waitingCount} op wachtlijst)</span>}
+            </p>
+            <p className="text-xs text-slate-500 mt-0.5">Arrangementen:
+              {slot.availablePackageIds.map(pid => allPackages.find(p => p.id === pid)?.name).filter(Boolean).join(', ') || 'Geen'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5 items-center flex-shrink-0">
+            <select
+                value={slot.showType || ShowType.REGULAR}
+                onChange={(e) => handleChangeShowType(slot.id, e.target.value as ShowType)}
+                className="text-xs p-1 border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+            >
+                {ALL_SHOW_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+            </select>
+            <button
+                onClick={() => handleToggleClose(slot)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors w-full sm:w-auto
+                  ${slot.isManuallyClosed 
+                    ? 'bg-yellow-500 hover:bg-yellow-600 text-white' 
+                    : 'bg-green-500 hover:bg-green-600 text-white'}`}
+            >
+                {slot.isManuallyClosed ? 'Openen' : 'Sluiten'}
+            </button>
+            <button onClick={() => openModalForEditShow(slot)} className="text-xs bg-yellow-400 hover:bg-yellow-500 text-yellow-800 font-medium py-1 px-2 rounded-md transition-colors">Bewerk</button>
+            <button 
+              onClick={() => handleDeleteShow(slot.id)} // Corrected to call handleDeleteShow
+              className="px-3 py-1.5 text-xs font-medium bg-red-500 hover:bg-red-600 text-white rounded-md transition-colors w-full sm:w-auto"
+            >
+              Verwijder
+            </button>
+          </div>
+        </div>
+      </div>
+     );
   };
 
   const handleChangeShowType = (slotId: string, newType: ShowType) => {
@@ -183,76 +250,72 @@ export const ShowManagement: React.FC<ShowManagementProps> = ({
 
   return (
     <div className="bg-white p-4 md:p-6 rounded-lg shadow-md">
-      <h2 className="text-xl font-semibold text-gray-700 mb-6">Showbeheer via Kalender</h2>
+      <h2 className="text-xl font-semibold text-gray-700 mb-6">Showbeheer</h2>
 
-      <CalendarView
-        showSlots={availableShowSlots}
-        selectedDate={selectedDate}
-        onDateSelect={handleDateSelectFromCalendar}
-        showTypeColors={SHOW_TYPE_COLORS}
-        className="mb-8 bg-slate-50 p-4 rounded-xl shadow-lg border border-slate-200"
-      />
+      {/* Filter Section */}
+      <div className="mb-6 p-4 bg-slate-50 rounded-lg shadow border border-slate-200">
+        <label htmlFor="showTypeFilter" className="block text-sm font-medium text-slate-700 mb-1">Filter op Show Type:</label>
+        <select
+          id="showTypeFilter"
+          name="showTypeFilter"
+          value={showTypeFilter}
+          onChange={(e) => setShowTypeFilter(e.target.value as ShowType | 'all')}
+          className="w-full md:w-1/3 p-2 border border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+        >
+          <option value="all">Alle Types</option>
+          {ALL_SHOW_TYPES.map(type => (
+            <option key={type} value={type}>{type}</option>
+          ))}
+        </select>
+      </div>
 
-      {selectedDate && (
-        <div id="daily-show-manager" className="mt-6 p-4 border border-indigo-200 rounded-lg bg-indigo-50 shadow-lg">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-indigo-700">
-              Shows op {new Date(selectedDate + 'T00:00:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </h3>
-            <button
-                onClick={() => openModalForNewShow(selectedDate)}
-                className="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-md text-sm transition-colors shadow-sm"
-            >
-                + Nieuwe Show
-            </button>
-          </div>
+      <div className="flex flex-col md:flex-row gap-6">
+        {/* Left Column: Calendar */}
+        <div className="md:w-1/2 lg:w-2/5">
+          <CalendarView
+            showSlots={availableShowSlots} // Pass all slots for calendar markers
+            selectedDate={selectedDate}
+            onDateSelect={handleDateSelectFromCalendar}
+            showTypeColors={SHOW_TYPE_COLORS}
+            className="bg-slate-50 p-4 rounded-xl shadow-lg border border-slate-200 h-full" // Ensure calendar takes height
+          />
+        </div>
 
-          {showsForSelectedDate.length === 0 ? (
-            <p className="text-slate-500 italic">Geen shows gepland op deze datum.</p>
+        {/* Right Column: Shows for selected date */}
+        <div className="md:w-1/2 lg:w-3/5">
+          {selectedDate ? (
+            <div id="daily-show-manager" className="p-4 border border-indigo-200 rounded-lg bg-indigo-50 shadow-lg h-full">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-indigo-700">
+                  Shows op {new Date(selectedDate + 'T00:00:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </h3>
+                <button
+                    onClick={() => openModalForNewShow(selectedDate)}
+                    className="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-md text-sm transition-colors shadow-sm"
+                >
+                    + Nieuwe Show
+                </button>
+              </div>
+
+              {showsForSelectedDate.length === 0 ? (
+                <p className="text-slate-500 italic">
+                  {showTypeFilter === 'all' 
+                    ? 'Geen shows gepland op deze datum.' 
+                    : `Geen shows van type '${showTypeFilter}' gepland op deze datum.`}
+                </p>
+              ) : (
+                <div className="space-y-3 max-h-[calc(100vh-25rem)] overflow-y-auto pr-2 scrollbar"> {/* Adjust max-h as needed */}
+                  {showsForSelectedDate.map(slot => renderShowCard(slot))}
+                </div>
+              )}
+            </div>
           ) : (
-            <div className="space-y-3">
-              {showsForSelectedDate.map(slot => {
-                 const waitingCount = waitingListEntries.filter(w => w.showSlotId === slot.id).length;
-                 return (
-                  <div key={slot.id} className={`p-3 rounded-md shadow-sm border ${slot.isManuallyClosed ? 'bg-red-100 border-red-300 opacity-80' : 'bg-white border-slate-200'}`}>
-                    <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
-                      <div className="flex-grow">
-                        <p className={`font-semibold ${slot.isManuallyClosed ? 'text-red-700 line-through' : 'text-slate-800'}`}>
-                          {slot.time} - {slot.showType || 'REGULAR'}
-                          <span className="ml-2 inline-block w-3 h-3 rounded-full" style={{backgroundColor: SHOW_TYPE_COLORS[slot.showType || ShowType.REGULAR]}}></span>
-                        </p>
-                        <p className="text-xs text-slate-500">Capaciteit: {slot.bookedCount}/{slot.capacity}
-                           {waitingCount > 0 && <span className="text-yellow-600 ml-2">({waitingCount} op wachtlijst)</span>}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-0.5">Arrangementen:
-                          {slot.availablePackageIds.map(pid => allPackages.find(p => p.id === pid)?.name).filter(Boolean).join(', ') || 'Geen'}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 items-center flex-shrink-0">
-                        <select
-                            value={slot.showType || ShowType.REGULAR}
-                            onChange={(e) => handleChangeShowType(slot.id, e.target.value as ShowType)}
-                            className="text-xs p-1 border-slate-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                        >
-                            {ALL_SHOW_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
-                        </select>
-                        <button
-                            onClick={() => handleToggleCloseShow(slot)}
-                            className={`text-xs font-medium py-1 px-2 rounded-md transition-colors ${slot.isManuallyClosed ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'}`}
-                        >
-                            {slot.isManuallyClosed ? 'Openen' : 'Sluiten'}
-                        </button>
-                        <button onClick={() => openModalForEditShow(slot)} className="text-xs bg-yellow-400 hover:bg-yellow-500 text-yellow-800 font-medium py-1 px-2 rounded-md transition-colors">Bewerk</button>
-                        <button onClick={() => onRemoveShowSlot(slot.id)} className="text-xs bg-red-500 hover:bg-red-600 text-white font-medium py-1 px-2 rounded-md transition-colors">Verwijder</button>
-                      </div>
-                    </div>
-                  </div>
-                 );
-              })}
+            <div className="p-4 border border-slate-200 rounded-lg bg-slate-50 shadow-lg h-full flex items-center justify-center">
+              <p className="text-slate-500 italic">Selecteer een datum in de kalender om shows te bekijken of toe te voegen.</p>
             </div>
           )}
         </div>
-      )}
+      </div>
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-800 bg-opacity-75 flex items-center justify-center p-4 z-[100] backdrop-blur-sm" onClick={closeModal} role="dialog" aria-modal="true">

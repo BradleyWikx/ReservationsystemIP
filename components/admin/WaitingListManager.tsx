@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { WaitingListEntry, ShowSlot } from '../../types';
 
@@ -6,7 +5,7 @@ interface WaitingListManagerProps {
   entries: WaitingListEntry[];
   onRemoveEntry: (entryId: string) => void;
   showSlots: ShowSlot[]; 
-  onBookFromWaitingListModalOpen: (entry: WaitingListEntry) => void;
+  onBookFromWaitingListModalOpen: (entry: WaitingListEntry) => void; // Prop name confirmed
 }
 
 export const WaitingListManager: React.FC<WaitingListManagerProps> = ({ entries, onRemoveEntry, showSlots, onBookFromWaitingListModalOpen }) => {
@@ -22,20 +21,12 @@ export const WaitingListManager: React.FC<WaitingListManagerProps> = ({ entries,
 
   const handleBookNowAttempt = (entry: WaitingListEntry, slot: ShowSlot | undefined) => {
     if (!slot) {
+        // This case should ideally be prevented by disabling the button if slot is undefined.
         alert("Fout: Show details niet gevonden voor deze wachtlijst-inschrijving.");
         return;
     }
-    // Check if the slot is directly bookable (not manually closed and has capacity)
-    const isSlotDirectlyBookable = !slot.isManuallyClosed && slot.capacity > slot.bookedCount;
-
-    if (isSlotDirectlyBookable) {
-        onBookFromWaitingListModalOpen(entry);
-    } else {
-        // Show is full or closed, ask admin if they want to proceed to the booking modal (which itself has overbook confirm)
-        if (confirm(`Deze show (${new Date(slot.date + 'T00:00:00').toLocaleDateString('nl-NL')} ${slot.time}) is momenteel ${slot.isManuallyClosed ? 'gesloten' : 'vol'} (${slot.bookedCount}/${slot.capacity}). Een admin kan overboeken. Toch het boekingsproces starten vanaf de wachtlijst?`)) {
-            onBookFromWaitingListModalOpen(entry);
-        }
-    }
+    // Directly call the prop to open the modal. The modal itself will handle package selection and capacity checks.
+    onBookFromWaitingListModalOpen(entry);
   };
 
 
@@ -95,9 +86,9 @@ export const WaitingListManager: React.FC<WaitingListManagerProps> = ({ entries,
                   </div>
                   <div className="flex space-x-2 mt-2 sm:mt-0">
                     <button
-                        onClick={() => handleBookNowAttempt(entry, slotForEntry)}
+                        onClick={() => handleBookNowAttempt(entry, slotForEntry)} // Calls internal handler
                         className={`text-xs font-medium py-1 px-2 rounded-md transition-colors ${buttonClass}`}
-                        disabled={!slotForEntry}
+                        disabled={!slotForEntry} // Keep disabled if slotForEntry is undefined
                         title={buttonTitle}
                     >
                         Boek Nu

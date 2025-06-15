@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { ShowType } from '../types';
 
@@ -39,14 +38,14 @@ const ShowFilterControls: React.FC<ShowFilterControlsProps> = ({
     }
   };
 
-  const commonSelectClass = "w-full p-2.5 border border-slate-600 bg-slate-700 text-white rounded-md shadow-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-shadow";
+  const commonSelectClass = "w-full p-2.5 border border-slate-600 bg-slate-700 text-white rounded-md shadow-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-shadow text-sm";
 
   return (
-    <div className="w-full max-w-4xl mx-auto bg-slate-800 bg-opacity-50 backdrop-blur-md p-4 md:p-6 rounded-xl shadow-2xl border border-slate-700">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
+    <div className="w-full max-w-4xl mx-auto bg-slate-800 bg-opacity-60 backdrop-blur-md p-3 md:p-4 rounded-lg shadow-xl border border-slate-700">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 items-end">
         {/* Month Filter */}
-        <div className="flex-1 w-full">
-          <label htmlFor="month-filter" className="block text-sm font-medium text-slate-300 mb-1">
+        <div className="w-full">
+          <label htmlFor="month-filter" className="block text-xs font-medium text-slate-300 mb-0.5">
             Filter op Maand
           </label>
           <select
@@ -66,8 +65,8 @@ const ShowFilterControls: React.FC<ShowFilterControlsProps> = ({
         </div>
 
         {/* ShowType Filter */}
-        <div className="flex-1 w-full">
-          <label htmlFor="showtype-filter" className="block text-sm font-medium text-slate-300 mb-1">
+        <div className="w-full">
+          <label htmlFor="showtype-filter" className="block text-xs font-medium text-slate-300 mb-0.5">
             Filter op Soort Show
           </label>
           <select
@@ -87,10 +86,10 @@ const ShowFilterControls: React.FC<ShowFilterControlsProps> = ({
         </div>
 
         {/* Reset Button */}
-        <div className="w-full lg:w-auto">
+        <div className="w-full sm:col-span-2 md:col-span-1">
             <button
                 onClick={onResetFilters}
-                className="w-full bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2.5 px-5 rounded-md transition-colors shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 focus:ring-offset-slate-800"
+                className="w-full bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2.5 px-4 rounded-md transition-colors shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 focus:ring-offset-slate-800 text-sm"
                 aria-label="Reset alle filters"
             >
                 Reset Filters

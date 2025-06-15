@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ShowSlot, PackageOption, MerchandiseItem, OrderedMerchandiseItem, BookingData, ReservationDetails, Address, InvoiceDetails, ReservationStatus, SpecialAddOn, PromoCode, Customer, AppSettings } from '../../types'; // Added AppSettings
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { ShowSlot, PackageOption, MerchandiseItem, OrderedMerchandiseItem, BookingData, ReservationDetails, Address, InvoiceDetails, ReservationStatus, SpecialAddOn, PromoCode, Customer, AppSettings } from '../../types';
 import { CalendarView } from '../CalendarView';
 
 const CloseIconSvg = () => (
@@ -12,17 +12,16 @@ interface BookingStepperProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (details: Omit<ReservationDetails, 'reservationId' | 'bookingTimestamp' | 'date' | 'time' | 'packageName'>) => Promise<{ success: boolean; status: ReservationStatus }>;
-  showPackages: PackageOption[]; // Changed from allPackages to showPackages
+  showPackages: PackageOption[];
   specialAddons: SpecialAddOn[];
   availableShowSlots: ShowSlot[];
   merchandiseItems: MerchandiseItem[];
-  promoCodes: PromoCode[]; // Added promoCodes
-  appSettings: AppSettings; // Added appSettings
+  appSettings: AppSettings;
   initialData?: Partial<BookingData>;
-  onOpenWaitingListModal: (slotId: string) => void;
+  onOpenWaitingListModal: (slotId: string) => void; // Ensure this is correctly passed and used
   applyPromoCode: (codeString: string, currentBookingSubtotal: number) => { success: boolean; discountAmount?: number; message: string; appliedCodeObject?: PromoCode };
   loggedInCustomer: Customer | null;
-  onLogout?: () => void; // Made optional
+  onLogout?: () => void;
   showInfoModal: (title: string, message: React.ReactNode, status?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
@@ -39,11 +38,10 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
   isOpen,
   onClose,
   onSubmit,
-  showPackages, // Changed from allPackages
+  showPackages,
   specialAddons,
   availableShowSlots,
   merchandiseItems,
-  promoCodes,
   appSettings,
   initialData,
   onOpenWaitingListModal,
@@ -51,139 +49,210 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
   loggedInCustomer,
   showInfoModal,
 }) => {
-  // State variables
   const [currentStep, setCurrentStep] = useState(1);
-  const [selectedShowSlotId, setSelectedShowSlotId] = useState<string | undefined>(undefined);
-  const [selectedPackageId, setSelectedPackageId] = useState<string | undefined>(undefined);
-  const [guests, setGuests] = useState(1);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState<Address>({ street: '', houseNumber: '', postalCode: '', city: '' });
-  const [merchandise, setMerchandise] = useState<OrderedMerchandiseItem[]>([]);
-  const [selectedVoorborrel, setSelectedVoorborrel] = useState(false);
-  const [selectedNaborrel, setSelectedNaborrel] = useState(false);
-  const [calendarSelectedDate, setCalendarSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [agreedToPrivacyPolicy, setAgreedToPrivacyPolicy] = useState(false);
-  const [acceptsMarketingEmails, setAcceptsMarketingEmails] = useState(false);
-  
-  // Additional fields
-  const [celebrationDetails, setCelebrationDetails] = useState('');
-  const [dietaryWishes, setDietaryWishes] = useState('');
-  const [placementPreferenceDetails, setPlacementPreferenceDetails] = useState('');
-  const [invoiceDetails, setInvoiceDetails] = useState<InvoiceDetails>({
-    generateInvoice: false, // Changed from needsInvoice
-    sendInvoice: false, // Added default for sendInvoice
+  const [selectedShowSlotId, setSelectedShowSlotId] = useState<string | undefined>(initialData?.selectedShowSlotId);
+  const [selectedPackageId, setSelectedPackageId] = useState<string | undefined>(initialData?.selectedPackageId);
+  const [guests, setGuests] = useState(initialData?.guests || 1);
+  const [name, setName] = useState(loggedInCustomer?.name || initialData?.name || '');
+  const [email, setEmail] = useState(loggedInCustomer?.email || initialData?.email || '');
+  const [phone, setPhone] = useState(loggedInCustomer?.phone || initialData?.phone || '');
+  const [address, setAddress] = useState<Address>(loggedInCustomer?.address || initialData?.address || { street: '', houseNumber: '', postalCode: '', city: '' });
+  const [merchandise, setMerchandise] = useState<OrderedMerchandiseItem[]>(initialData?.merchandise || []);
+  const [selectedVoorborrel, setSelectedVoorborrel] = useState(initialData?.selectedVoorborrel || false);
+  const [selectedNaborrel, setSelectedNaborrel] = useState(initialData?.selectedNaborrel || false);
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState(initialData?.calendarSelectedDate || new Date().toISOString().split('T')[0]);
+  const [agreedToPrivacyPolicy, setAgreedToPrivacyPolicy] = useState(initialData?.agreedToPrivacyPolicy || false);
+  const [acceptsMarketingEmails, setAcceptsMarketingEmails] = useState(initialData?.acceptsMarketingEmails || false);
+  const [celebrationDetails, setCelebrationDetails] = useState(initialData?.celebrationDetails || '');
+  const [dietaryWishes, setDietaryWishes] = useState(initialData?.dietaryWishes || '');
+  const [placementPreferenceDetails, setPlacementPreferenceDetails] = useState(''); // Not in initialData typically
+  const [invoiceDetails, setInvoiceDetails] = useState<InvoiceDetails>(initialData?.invoiceDetails || {
+    generateInvoice: false,
+    sendInvoice: false,
     companyName: '',
     vatNumber: '',
-    address: undefined, // Changed from invoiceAddress to address
+    address: undefined,
     remarks: ''
   });
-  const [promoCodeInput, setPromoCodeInput] = useState('');
-  const [appliedPromoCode, setAppliedPromoCode] = useState<string | undefined>(undefined);
-  const [discountAmount, setDiscountAmount] = useState(0);
+  const [showDifferentInvoiceAddress, setShowDifferentInvoiceAddress] = useState(false);
+  const [invoiceAddress, setInvoiceAddress] = useState<Address>({ street: '', houseNumber: '', postalCode: '', city: '' });
+
+  const [promoCodeInput, setPromoCodeInput] = useState(initialData?.promoCodeInput || '');
+  const [appliedPromoCode, setAppliedPromoCode] = useState<string | undefined>(initialData?.appliedPromoCode);
+  const [discountAmount, setDiscountAmount] = useState(initialData?.discountAmount || 0);
   const [isApplyingPromoCode, setIsApplyingPromoCode] = useState(false);
+  const [currentTotalPrice, setCurrentTotalPrice] = useState(0);
   
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isStepValid, setIsStepValid] = useState(false);
   
   const modalRef = useRef<HTMLDivElement>(null);
   const selectedShowSlot = availableShowSlots.find(s => s.id === selectedShowSlotId);
+  const selectedPackage = showPackages.find(p => p.id === selectedPackageId);
+  const isShowFull = selectedShowSlot ? (selectedShowSlot.bookedCount >= selectedShowSlot.capacity || selectedShowSlot.availableSlots <= 0) : false;
 
-  // Initialize form when modal opens
+  const resetForm = useCallback(() => {
+    setCurrentStep(1);
+    setSelectedShowSlotId(initialData?.selectedShowSlotId);
+    setSelectedPackageId(initialData?.selectedPackageId);
+    setGuests(initialData?.guests || 1);
+    setName(loggedInCustomer?.name || initialData?.name || '');
+    setEmail(loggedInCustomer?.email || initialData?.email || '');
+    setPhone(loggedInCustomer?.phone || initialData?.phone || '');
+    setAddress(loggedInCustomer?.address || initialData?.address || { street: '', houseNumber: '', postalCode: '', city: '' });
+    setMerchandise(initialData?.merchandise || []);
+    setSelectedVoorborrel(initialData?.selectedVoorborrel || false);
+    setSelectedNaborrel(initialData?.selectedNaborrel || false);
+    setAgreedToPrivacyPolicy(initialData?.agreedToPrivacyPolicy || false);
+    setAcceptsMarketingEmails(initialData?.acceptsMarketingEmails || false);
+    setCelebrationDetails(initialData?.celebrationDetails || '');
+    setDietaryWishes(initialData?.dietaryWishes || '');
+    setPlacementPreferenceDetails('');
+    setInvoiceDetails(initialData?.invoiceDetails || {
+      generateInvoice: false,
+      sendInvoice: false,
+      companyName: '',
+      vatNumber: '',
+      address: undefined,
+      remarks: ''
+    });
+    setShowDifferentInvoiceAddress(false);
+    setInvoiceAddress({ street: '', houseNumber: '', postalCode: '', city: '' });
+    setPromoCodeInput(initialData?.promoCodeInput || '');
+    setAppliedPromoCode(initialData?.appliedPromoCode);
+    setDiscountAmount(initialData?.discountAmount || 0);
+    setIsApplyingPromoCode(false);
+    setErrors({});
+    if (initialData?.selectedShowSlotId) {
+      const slot = availableShowSlots.find(s => s.id === initialData.selectedShowSlotId);
+      if (slot) setCalendarSelectedDate(slot.date);
+    } else {
+      setCalendarSelectedDate(new Date().toISOString().split('T')[0]);
+    }
+  }, [initialData, availableShowSlots, loggedInCustomer]);
+
   useEffect(() => {
     if (isOpen) {
-      setCurrentStep(1);
-      setSelectedShowSlotId(initialData?.selectedShowSlotId);
-      setSelectedPackageId(undefined);
-      setGuests(1);
-      setName(loggedInCustomer?.name || '');
-      setEmail(loggedInCustomer?.email || '');
-      setPhone(loggedInCustomer?.phone || '');
-      setAddress(loggedInCustomer?.address || { street: '', houseNumber: '', postalCode: '', city: '' });
-      setMerchandise([]);
-      setSelectedVoorborrel(false);
-      setSelectedNaborrel(false);
-      setAgreedToPrivacyPolicy(false);
-      setAcceptsMarketingEmails(false);
-      setCelebrationDetails('');
-      setDietaryWishes('');
-      setPlacementPreferenceDetails('');
-      setInvoiceDetails({
-        generateInvoice: false, // Changed from needsInvoice
-        sendInvoice: false, // Added default for sendInvoice
-        companyName: '',
-        vatNumber: '',
-        address: undefined, // Changed from invoiceAddress to address
-        remarks: ''
-      });
-      setPromoCodeInput('');
-      setAppliedPromoCode(undefined);
-      setDiscountAmount(0);
-      setIsApplyingPromoCode(false);
-      setErrors({});
-      
-      if (initialData?.selectedShowSlotId) {
-        const slot = availableShowSlots.find(s => s.id === initialData.selectedShowSlotId);
-        if (slot) {
-          setCalendarSelectedDate(slot.date);
-        }
-      }
+      resetForm();
     }
-  }, [isOpen, initialData, availableShowSlots, loggedInCustomer]);
+  }, [isOpen, resetForm]);
 
-  const validateStep = (): boolean => {
+  // Populate fields when loggedInCustomer changes
+  useEffect(() => {
+    if (loggedInCustomer) {
+      setName(loggedInCustomer.name || '');
+      setEmail(loggedInCustomer.email || '');
+      setPhone(loggedInCustomer.phone || '');
+      setAddress(loggedInCustomer.address || { street: '', houseNumber: '', postalCode: '', city: '' });
+    }
+  }, [loggedInCustomer]);
+
+  const validateStep = useCallback((): boolean => {
     const newErrors: Record<string, string> = {};
-    
+    let isValid = true;
+
     switch (currentStep) {
-      case 1:
+      case 1: // Datum & Tijd
         if (!selectedShowSlotId) {
           newErrors.showSlotId = 'Selecteer een beschikbare showtijd.';
+          isValid = false;
         }
         break;
-      case 2:
+      case 2: // Arrangement
         if (!selectedPackageId) {
           newErrors.packageId = 'Selecteer een arrangement.';
+          isValid = false;
+        }
+        if (selectedPackage?.minPersons && guests < selectedPackage.minPersons) {
+          newErrors.guests = `Dit arrangement vereist minimaal ${selectedPackage.minPersons} gasten.`;
+          isValid = false;
         }
         break;
-      case 3:
-        // Extra options validation
+      case 3: // Extra opties
         const voorborrelAddon = specialAddons.find(a => a.id === 'voorborrel');
         if (selectedVoorborrel && voorborrelAddon?.minPersons && guests < voorborrelAddon.minPersons) {
           newErrors.voorborrel = `Borrel vooraf vereist minimaal ${voorborrelAddon.minPersons} gasten.`;
+          // This might not make the step invalid if it's just a warning or handled by disabling checkbox
         }
-        if (invoiceDetails.generateInvoice && !invoiceDetails.companyName?.trim()) { // Changed from needsInvoice
-          newErrors.companyName = 'Bedrijfsnaam is verplicht voor factuur.';
+        if (invoiceDetails.generateInvoice) {
+          if (!invoiceDetails.companyName?.trim()) {
+            newErrors.companyName = 'Bedrijfsnaam is verplicht voor factuur.';
+            isValid = false;
+          }
+          if (showDifferentInvoiceAddress) {
+            if (!invoiceAddress.street.trim()) { newErrors.invoiceStreet = 'Straat (factuur) is verplicht.'; isValid = false; }
+            if (!invoiceAddress.houseNumber.trim()) { newErrors.invoiceHouseNumber = 'Huisnummer (factuur) is verplicht.'; isValid = false; }
+            if (!invoiceAddress.postalCode.trim()) { newErrors.invoicePostalCode = 'Postcode (factuur) is verplicht.'; isValid = false; }
+            if (!invoiceAddress.city.trim()) { newErrors.invoiceCity = 'Plaats (factuur) is verplicht.'; isValid = false; }
+          }
         }
         break;
-      case 5:
-        // Personal information validation
-        if (!name.trim()) newErrors.name = 'Naam is verplicht.';
-        if (!email.trim()) newErrors.email = 'E-mail is verplicht.';
-        else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Voer een geldig e-mailadres in.';
-        if (!phone.trim()) newErrors.phone = 'Telefoonnummer is verplicht.';
-        if (guests < 1) newErrors.guests = 'Aantal gasten moet minimaal 1 zijn.';
-        if (!address.street.trim()) newErrors.street = 'Straat is verplicht.';
-        if (!address.houseNumber.trim()) newErrors.houseNumber = 'Huisnummer is verplicht.';
-        if (!address.postalCode.trim()) newErrors.postalCode = 'Postcode is verplicht.';
-        if (!address.city.trim()) newErrors.city = 'Plaats is verplicht.';
+      case 4: // Merchandise - Usually no strict validation to proceed
+        break;
+      case 5: // Persoonlijke gegevens
+        if (!name.trim()) { newErrors.name = 'Naam is verplicht.'; isValid = false; }
+        if (!email.trim()) { newErrors.email = 'E-mail is verplicht.'; isValid = false; }
+        else if (!/\S+@\S+\.\S+/.test(email)) { newErrors.email = 'Voer een geldig e-mailadres in.'; isValid = false; }
+        if (!phone.trim()) { newErrors.phone = 'Telefoonnummer is verplicht.'; isValid = false; }
+        if (guests < 1) { newErrors.guests = 'Aantal gasten moet minimaal 1 zijn.'; isValid = false; }
+        
+        // Main address validation
+        if (!address.street.trim()) { newErrors.street = 'Straat is verplicht.'; isValid = false; }
+        if (!address.houseNumber.trim()) { newErrors.houseNumber = 'Huisnummer is verplicht.'; isValid = false; }
+        if (!address.postalCode.trim()) { newErrors.postalCode = 'Postcode is verplicht.'; isValid = false; }
+        if (!address.city.trim()) { newErrors.city = 'Plaats is verplicht.'; isValid = false; }
+
         if (!agreedToPrivacyPolicy) {
           newErrors.agreedToPrivacyPolicy = 'U dient akkoord te gaan met het privacybeleid.';
+          isValid = false;
         }
         break;
-      case 6:
-        // Final validation
-        if (!name.trim() || !email.trim() || !phone.trim()) {
-          newErrors.final = 'Controleer of alle verplichte velden zijn ingevuld.';
+      case 6: // Overzicht & Bevestiging - All previous steps should be valid
+        // This step itself doesn't add new inputs, so it's valid if previous ones are.
+        // However, a final check can be reiterated here if needed.
+        if (!selectedShowSlotId || !selectedPackageId || !name.trim() || !email.trim() || !phone.trim() || !agreedToPrivacyPolicy) {
+          newErrors.final = 'Controleer of alle verplichte velden in eerdere stappen correct zijn ingevuld.';
+          isValid = false;
         }
         break;
     }
     
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
+    setIsStepValid(isValid);
+    return isValid;
+  }, [currentStep, selectedShowSlotId, selectedPackageId, guests, name, email, phone, address, agreedToPrivacyPolicy, invoiceDetails, showDifferentInvoiceAddress, invoiceAddress, selectedPackage, specialAddons]);
+
+  // Validate step whenever relevant state changes
+  useEffect(() => {
+    validateStep();
+  }, [validateStep, currentStep, selectedShowSlotId, selectedPackageId, guests, name, email, phone, address, agreedToPrivacyPolicy, invoiceDetails, showDifferentInvoiceAddress, invoiceAddress]);
+
+  const calculateCurrentTotalPrice = useCallback(() => {
+    const packagePrice = selectedPackage?.price ? selectedPackage.price * guests : 0;
+    let addOnPrice = 0;
+    if (selectedVoorborrel) {
+      const voorborrelAddon = specialAddons.find(a => a.id === 'voorborrel');
+      addOnPrice += (voorborrelAddon?.price || 0) * guests;
+    }
+    if (selectedNaborrel) {
+      const naborrelAddon = specialAddons.find(a => a.id === 'naborrel');
+      addOnPrice += (naborrelAddon?.price || 0) * guests;
+    }
+    const merchandisePrice = merchandise.reduce((total, item) => total + (item.itemPrice * item.quantity), 0);
+    const subtotal = packagePrice + addOnPrice + merchandisePrice;
+    return Math.max(0, subtotal - discountAmount);
+  }, [selectedPackage, guests, selectedVoorborrel, selectedNaborrel, merchandise, discountAmount, specialAddons]);
+
+  useEffect(() => {
+    setCurrentTotalPrice(calculateCurrentTotalPrice());
+  }, [calculateCurrentTotalPrice]);
 
   const nextStep = () => {
-    if (validateStep()) {
+    if (validateStep()) { // Re-validate before proceeding
+      if (currentStep === 1 && isShowFull && selectedShowSlotId) { // Check for full show at step 1
+        // Option to join waiting list if show is full, handled by button change below
+        return; 
+      }
       if (currentStep < STEPS.length) {
         setCurrentStep(prev => prev + 1);
       } else {
@@ -199,64 +268,81 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
   };
 
   const handleSubmit = async () => {
-    if (!validateStep() || !selectedShowSlot || !selectedPackageId) return;
+    // Final validation across all critical fields before submission
+    const finalValidationErrors: Record<string, string> = {};
+    if (!selectedShowSlotId) finalValidationErrors.showSlotId = 'Show selectie is verplicht.';
+    if (!selectedPackageId) finalValidationErrors.packageId = 'Arrangement selectie is verplicht.';
+    if (!name.trim()) finalValidationErrors.name = 'Naam is verplicht.';
+    if (!email.trim() || !/\S+@\S+\.\S+/.test(email)) finalValidationErrors.email = 'Geldig e-mailadres is verplicht.';
+    if (!phone.trim()) finalValidationErrors.phone = 'Telefoonnummer is verplicht.';
+    if (!address.street.trim() || !address.houseNumber.trim() || !address.postalCode.trim() || !address.city.trim()) finalValidationErrors.address = 'Volledig adres is verplicht.';
+    if (!agreedToPrivacyPolicy) finalValidationErrors.agreedToPrivacyPolicy = 'Akkoord met privacybeleid is vereist.';
+    if (invoiceDetails.generateInvoice) {
+        if (!invoiceDetails.companyName?.trim()) finalValidationErrors.companyName = 'Bedrijfsnaam is verplicht voor factuur.';
+        if (showDifferentInvoiceAddress) {
+            if (!invoiceAddress.street.trim() || !invoiceAddress.houseNumber.trim() || !invoiceAddress.postalCode.trim() || !invoiceAddress.city.trim()) finalValidationErrors.invoiceAddress = 'Volledig factuuradres is verplicht.';
+        }
+    }
 
-    const totalPrice = calculateTotalPrice();
+    if (Object.keys(finalValidationErrors).length > 0) {
+        setErrors(finalValidationErrors);
+        // Optionally, navigate to the first step with an error or show a general message
+        showInfoModal('Validatiefout', 'Controleer alstublieft alle gemarkeerde velden.', 'error');
+        // Attempt to navigate to the step with the first error
+        if (finalValidationErrors.showSlotId || finalValidationErrors.packageId) setCurrentStep(1);
+        else if (finalValidationErrors.companyName || finalValidationErrors.invoiceAddress) setCurrentStep(3);
+        else if (finalValidationErrors.name || finalValidationErrors.email || finalValidationErrors.phone || finalValidationErrors.address || finalValidationErrors.agreedToPrivacyPolicy) setCurrentStep(5);
+        return;
+    }
+
+    const finalTotalPrice = calculateCurrentTotalPrice();
+    const finalInvoiceDetails = {
+      ...invoiceDetails,
+      address: showDifferentInvoiceAddress ? invoiceAddress : address, // Use main address if not different invoice address
+    };
 
     try {
-      console.log('Submitting booking with data:', {
-        showSlotId: selectedShowSlot.id,
-        packageId: selectedPackageId,
-        guests,
-        name,
-        email,
-        phone,
-        address,
-        totalPrice
-      });
-
       const result = await onSubmit({
-        showSlotId: selectedShowSlot.id,
-        packageId: selectedPackageId,
+        showSlotId: selectedShowSlotId!,
+        packageId: selectedPackageId!,
         guests,
         name,
         email,
         phone,
-        address,
+        address, // This is the primary address for the customer
         merchandise,
         selectedVoorborrel,
         selectedNaborrel,
         ...(celebrationDetails && { celebrationDetails }),
         ...(dietaryWishes && { dietaryWishes }),
         ...(placementPreferenceDetails && { placementPreferenceDetails }),
-        totalPrice,
+        totalPrice: finalTotalPrice,
         customerId: loggedInCustomer?.id,
         agreedToPrivacyPolicy,
         acceptsMarketingEmails,
-        invoiceDetails,
+        invoiceDetails: finalInvoiceDetails, // This contains the correct invoice address
         discountAmount,
         ...(appliedPromoCode && { appliedPromoCode }),
-        status: 'pending' as ReservationStatus
-      });      console.log('Booking result:', result);
+        status: 'pending' as ReservationStatus 
+      });
 
       if (result.success) {
-        // Don't show a simple modal here - the parent component will show the confirmation modal
-        onClose();
+        onClose(); 
       } else {
-        showInfoModal('Fout', 'Er ging iets mis bij het verwerken van de boeking.', 'error');
+        showInfoModal('Fout bij boeking', 'Er ging iets mis bij het verwerken van de boeking. Probeer het later opnieuw.', 'error');
       }
     } catch (error) {
       console.error('Booking submission error:', error);
-      showInfoModal('Fout', `Er is een fout opgetreden bij het verwerken van uw boeking: ${error}`, 'error');
+      showInfoModal('Onverwachte Fout', `Er is een onverwachte fout opgetreden: ${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   };
 
   const handleDateSelect = (dateString: string) => {
     setCalendarSelectedDate(dateString);
-    setSelectedShowSlotId(undefined);
+    setSelectedShowSlotId(undefined); // Reset dependent selections
     setSelectedPackageId(undefined);
-    setErrors({});
-    
+    setErrors({}); // Clear previous errors
+    // Auto-select if only one slot
     const slotsOnSelectedDate = availableShowSlots.filter(slot => slot.date === dateString);
     if (slotsOnSelectedDate.length === 1) {
       const singleSlot = slotsOnSelectedDate[0];
@@ -265,17 +351,20 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
         setSelectedShowSlotId(singleSlot.id);
       }
     }
+    // validateStep(); // Will be called by useEffect
   };
 
   const handleTimeSelect = (slotId: string) => {
     setSelectedShowSlotId(slotId);
-    setSelectedPackageId(undefined);
+    setSelectedPackageId(undefined); // Reset package if time changes
     setErrors({});
+    // validateStep();
   };
 
   const handlePackageSelect = (packageId: string) => {
     setSelectedPackageId(packageId);
     setErrors({});
+    // validateStep();
   };
 
   const handleMerchandiseQuantityChange = (itemId: string, quantity: number) => {
@@ -283,100 +372,99 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
     if (!item) return;
 
     setMerchandise(prev => {
-      const existing = prev.find(m => m.itemId === itemId);
-      if (existing) {
-        return prev.map(m => m.itemId === itemId ? { ...m, quantity } : m);
-      } else if (quantity > 0) {
-        return [...prev, { itemId, itemName: item.name, itemPrice: item.priceInclVAT, quantity }];
+      const existingIndex = prev.findIndex(m => m.itemId === itemId);
+      if (quantity <= 0) {
+        if (existingIndex > -1) return prev.filter(m => m.itemId !== itemId);
+        return prev;
       }
-      return prev;
+      if (existingIndex > -1) {
+        return prev.map(m => m.itemId === itemId ? { ...m, quantity } : m);
+      }
+      return [...prev, { itemId, itemName: item.name, itemPrice: item.priceInclVAT, quantity }];
     });
+    // Price recalculation will happen via useEffect on `merchandise`
   };
-
+  
   const handleApplyPromoCode = async () => {
-    if (!promoCodeInput.trim()) return;
+    if (!promoCodeInput.trim() || appliedPromoCode) return;
 
     setIsApplyingPromoCode(true);
     try {
-      const currentSubtotal = calculateSubtotal();
-      const result = applyPromoCode(promoCodeInput.trim(), currentSubtotal);
+      // Recalculate subtotal without existing discount for promo code application
+      const packagePrice = selectedPackage?.price ? selectedPackage.price * guests : 0;
+      let addOnPrice = 0;
+      if (selectedVoorborrel) {
+        const voorborrelAddon = specialAddons.find(a => a.id === 'voorborrel');
+        addOnPrice += (voorborrelAddon?.price || 0) * guests;
+      }
+      if (selectedNaborrel) {
+        const naborrelAddon = specialAddons.find(a => a.id === 'naborrel');
+        addOnPrice += (naborrelAddon?.price || 0) * guests;
+      }
+      const merchandisePrice = merchandise.reduce((total, item) => total + (item.itemPrice * item.quantity), 0);
+      const currentSubtotalForPromo = packagePrice + addOnPrice + merchandisePrice;
+
+      const result = applyPromoCode(promoCodeInput.trim(), currentSubtotalForPromo);
       
       if (result.success && result.discountAmount && result.appliedCodeObject) {
         setAppliedPromoCode(result.appliedCodeObject.code);
         setDiscountAmount(result.discountAmount);
         showInfoModal('Promocode Toegepast', result.message, 'success');
       } else {
+        setAppliedPromoCode(undefined); // Clear if previously applied but now invalid
+        setDiscountAmount(0);
         showInfoModal('Promocode Fout', result.message, 'error');
       }
     } catch (error) {
+      setAppliedPromoCode(undefined);
+      setDiscountAmount(0);
       showInfoModal('Fout', 'Er is een fout opgetreden bij het toepassen van de promocode.', 'error');
     } finally {
       setIsApplyingPromoCode(false);
     }
   };
 
-  const calculateSubtotal = (): number => {
-    const selectedPackage = showPackages.find(p => p.id === selectedPackageId); // Changed from allPackages
-    const packagePrice = selectedPackage?.price ? selectedPackage.price * guests : 0; // Safe access to price
-    
-    let addOnPrice = 0;
-    if (selectedVoorborrel) {
-      const voorborrelAddon = specialAddons.find(a => a.id === 'voorborrel');
-      addOnPrice += (voorborrelAddon?.price || 15) * guests;
-    }
-    if (selectedNaborrel) {
-      const naborrelAddon = specialAddons.find(a => a.id === 'naborrel');
-      addOnPrice += (naborrelAddon?.price || 15) * guests;
-    }
-    
-    const merchandisePrice = merchandise.reduce((total, item) => total + (item.itemPrice * item.quantity), 0);
-    return packagePrice + addOnPrice + merchandisePrice;
-  };
-
-  const calculateTotalPrice = (): number => {
-    const subtotal = calculateSubtotal();
-    return Math.max(0, subtotal - discountAmount);
-  };
-
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
       <div 
         ref={modalRef}
-        className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden"
+        className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[95vh] flex flex-col"
         role="dialog"
         aria-modal="true"
         aria-labelledby="booking-modal-title"
       >
         {/* Header */}
-        <div className="bg-indigo-600 text-white p-6 relative">
+        <div className="bg-indigo-600 text-white p-5 relative rounded-t-lg">
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 text-white hover:text-gray-200"
+            className="absolute top-3 right-3 text-indigo-200 hover:text-white transition-colors"
             aria-label="Sluit modal"
           >
             <CloseIconSvg />
           </button>
-          <h2 id="booking-modal-title" className="text-2xl font-bold mb-4">
-            Reservering maken
+          <h2 id="booking-modal-title" className="text-xl lg:text-2xl font-semibold mb-3">
+            Maak uw reservering
           </h2>
           
           {/* Progress Steps */}
-          <div className="flex items-center space-x-2 overflow-x-auto">
+          <div className="flex items-center space-x-1 sm:space-x-2 overflow-x-auto pb-1">
             {STEPS.map((step, index) => (
-              <div key={step.id} className="flex items-center">
-                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${
-                  currentStep >= step.id ? 'bg-white text-indigo-600' : 'bg-indigo-500 text-white'
+              <div key={step.id} className="flex items-center min-w-max">
+                <div className={`flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full text-xs sm:text-sm font-medium transition-all duration-300 ${
+                  currentStep === step.id ? 'bg-white text-indigo-600 ring-2 ring-offset-2 ring-offset-indigo-600 ring-white' : currentStep > step.id ? 'bg-green-400 text-white' : 'bg-indigo-500 text-indigo-200'
                 }`}>
-                  {step.icon}
+                  {currentStep > step.id ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                  ) : step.icon}
                 </div>
-                <span className={`ml-2 text-sm ${currentStep >= step.id ? 'text-white' : 'text-indigo-200'}`}>
+                <span className={`ml-1.5 sm:ml-2 text-xs sm:text-sm transition-colors duration-300 ${currentStep >= step.id ? 'text-white font-medium' : 'text-indigo-200'}`}>
                   {step.title}
                 </span>
                 {index < STEPS.length - 1 && (
-                  <div className={`w-8 h-0.5 mx-4 ${
-                    currentStep > step.id ? 'bg-white' : 'bg-indigo-500'
+                  <div className={`flex-auto h-0.5 mx-2 sm:mx-3 transition-colors duration-300 ${
+                    currentStep > step.id ? 'bg-green-400' : 'bg-indigo-500'
                   }`} />
                 )}
               </div>
@@ -384,66 +472,70 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
           </div>
         </div>
 
-        {/* Content */}
-        <div className="flex">
+        {/* Content & Summary Split */}
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
           {/* Left Panel - Form */}
-          <div className="flex-1 p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+          <div className="flex-1 p-5 overflow-y-auto max-h-[calc(95vh-220px)] md:max-h-full scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
             {/* Step 1: Date & Time */}
             {currentStep === 1 && (
               <div>
-                <h3 className="text-xl font-semibold mb-4">Selecteer Datum & Tijd</h3>
+                <h3 className="text-xl font-semibold mb-4 text-gray-800">Selecteer Datum & Tijd</h3>
                 <CalendarView
                   showSlots={availableShowSlots}
                   onDateSelect={handleDateSelect}
                   selectedDate={calendarSelectedDate}
                 />
                 
-                {/* Time slots for selected date */}
                 {calendarSelectedDate && (
-                  <div className="mt-4">
-                    <h4 className="font-medium mb-2">Beschikbare tijden voor {calendarSelectedDate}:</h4>
-                    <div className="grid gap-2">
-                      {availableShowSlots
-                        .filter(slot => slot.date === calendarSelectedDate)
-                        .map(slot => {
-                          const isBookable = !(slot.bookedCount >= slot.capacity || slot.isManuallyClosed);
-                          const availableSpots = slot.capacity - slot.bookedCount;
-                          
-                          return (
-                            <div key={slot.id} className="flex items-center justify-between">
-                              <button
-                                onClick={() => handleTimeSelect(slot.id)}
-                                disabled={!isBookable}
-                                className={`flex-1 p-3 text-left border rounded-lg transition-colors ${
-                                  selectedShowSlotId === slot.id 
-                                    ? 'border-indigo-500 bg-indigo-50' 
-                                    : isBookable 
-                                      ? 'border-gray-200 hover:border-gray-300'
-                                      : 'border-gray-200 bg-gray-50 cursor-not-allowed'
-                                }`}
-                              >
-                                <div className="flex justify-between items-center">
-                                  <span className={`font-medium ${!isBookable ? 'text-gray-400' : ''}`}>
-                                    {slot.time}
-                                  </span>
-                                  <span className={`text-sm ${!isBookable ? 'text-gray-400' : 'text-gray-600'}`}>
-                                    {isBookable ? `${availableSpots} plaatsen beschikbaar` : 'Uitverkocht'}
-                                  </span>
-                                </div>
-                              </button>
-                              {!isBookable && (
+                  <div className="mt-6">
+                    <h4 className="font-medium mb-3 text-gray-700">Beschikbare tijden voor {new Date(calendarSelectedDate + 'T00:00:00').toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}:</h4>
+                    {availableShowSlots.filter(slot => slot.date === calendarSelectedDate).length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {availableShowSlots
+                            .filter(slot => slot.date === calendarSelectedDate)
+                            .sort((a,b) => a.time.localeCompare(b.time)) // Sort by time
+                            .map(slot => {
+                            const isBookable = !(slot.bookedCount >= slot.capacity || slot.isManuallyClosed);
+                            const availableSpots = slot.capacity - slot.bookedCount;
+                            
+                            return (
+                                <div key={slot.id} className="flex items-stretch">
                                 <button
-                                  onClick={() => onOpenWaitingListModal(slot.id)}
-                                  className="ml-2 px-3 py-2 bg-orange-500 text-white text-sm rounded-md hover:bg-orange-600"
+                                    onClick={() => handleTimeSelect(slot.id)}
+                                    disabled={!isBookable}
+                                    className={`flex-1 p-3.5 text-left border rounded-lg transition-all duration-150 ease-in-out focus:ring-2 focus:ring-offset-1 focus:ring-indigo-500 ${
+                                    selectedShowSlotId === slot.id 
+                                        ? 'border-indigo-600 bg-indigo-50 shadow-md ring-2 ring-indigo-500' 
+                                        : isBookable 
+                                        ? 'border-gray-300 hover:border-indigo-400 hover:shadow-sm'
+                                        : 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    }`}
                                 >
-                                  Wachtlijst
+                                    <div className="flex justify-between items-center">
+                                    <span className={`font-semibold text-base ${!isBookable ? 'text-gray-400' : 'text-indigo-700'}`}>
+                                        {slot.time}
+                                    </span>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${!isBookable ? 'text-gray-400 bg-gray-200' : 'text-green-700 bg-green-100'}`}>
+                                        {isBookable ? `${availableSpots} vrij` : 'Vol'}
+                                    </span>
+                                    </div>
+                                    {slot.name && <p className="text-xs text-gray-500 mt-1">{slot.name}</p>}
                                 </button>
-                              )}
-                            </div>
-                          );
-                        })
-                      }
-                    </div>
+                                {!isBookable && (
+                                    <button
+                                    onClick={() => onOpenWaitingListModal(slot.id)}
+                                    className="ml-2 px-3 py-2 bg-amber-500 text-white text-xs font-medium rounded-md hover:bg-amber-600 transition-colors whitespace-nowrap self-center"
+                                    >
+                                    Wachtlijst
+                                    </button>
+                                )}
+                                </div>
+                            );
+                            })}
+                        </div>
+                    ) : (
+                        <p className="text-gray-500 mt-3">Geen shows beschikbaar op deze datum.</p>
+                    )}
                   </div>
                 )}
                 {errors.showSlotId && (
@@ -455,51 +547,51 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
             {/* Step 2: Package Selection */}
             {currentStep === 2 && (
               <div>
-                <h3 className="text-xl font-semibold mb-4">Kies uw Arrangement</h3>
+                <h3 className="text-xl font-semibold mb-4 text-gray-800">Kies uw Arrangement</h3>
                 {selectedShowSlot && (
-                  <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+                  <div className="mb-5 p-3.5 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-sm text-blue-800">
-                      Gekozen show: <strong>{selectedShowSlot.date} om {selectedShowSlot.time}</strong>
+                      Gekozen show: <strong className="font-semibold">{selectedShowSlot.date} om {selectedShowSlot.time}</strong>
+                      {selectedShowSlot.name && <span className="italic"> ({selectedShowSlot.name})</span>}
                     </p>
-                    {selectedShowSlot.name && (
-                      <p className="text-sm text-blue-700">{selectedShowSlot.name}</p>
-                    )}
                   </div>
                 )}
-                <div className="grid gap-4">
-                  {showPackages // Changed from allPackages
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {showPackages
                     .filter(pkg => !selectedShowSlot || (selectedShowSlot.availablePackageIds && selectedShowSlot.availablePackageIds.includes(pkg.id)))
                     .map(pkg => (
                     <div 
                       key={pkg.id}
-                      className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                        selectedPackageId === pkg.id ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
-                      } ${pkg.colorCode ? `${pkg.colorCode} text-white` : ''}`}
+                      className={`border rounded-lg p-4 cursor-pointer transition-all duration-150 ease-in-out hover:shadow-md focus-within:ring-2 focus-within:ring-offset-1 focus-within:ring-indigo-500 ${
+                        selectedPackageId === pkg.id ? 'border-indigo-600 bg-indigo-50 shadow-lg ring-2 ring-indigo-500' : 'border-gray-300 hover:border-indigo-400'
+                      } ${pkg.colorCode ? `${pkg.colorCode} text-white` : 'bg-white'}`}
                       onClick={() => handlePackageSelect(pkg.id)}
+                      tabIndex={0} // Make it focusable
+                      onKeyPress={(e) => e.key === 'Enter' && handlePackageSelect(pkg.id)}
                     >
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
-                          <h4 className={`font-medium text-lg ${pkg.colorCode ? 'text-white' : ''}`}>
+                          <h4 className={`font-semibold text-lg ${pkg.colorCode ? 'text-white' : 'text-gray-800'}`}>
                             {pkg.name}
                           </h4>
-                          <p className={`text-sm mt-1 ${pkg.colorCode ? 'text-gray-100' : 'text-gray-600'}`}>
+                          <p className={`text-sm mt-1 ${pkg.colorCode ? 'text-indigo-100' : 'text-gray-600'}`}>
                             {pkg.description}
                           </p>
                           {pkg.days && (
-                            <p className={`text-xs mt-1 ${pkg.colorCode ? 'text-gray-200' : 'text-gray-500'}`}>
+                            <p className={`text-xs mt-1 ${pkg.colorCode ? 'text-indigo-200' : 'text-gray-500'}`}>
                               {pkg.days}
                             </p>
                           )}
                           {pkg.details && pkg.details.length > 0 && (
-                            <div className="mt-2">
-                              <p className={`text-xs font-medium ${pkg.colorCode ? 'text-gray-200' : 'text-gray-600'}`}>
+                            <div className="mt-2.5">
+                              <p className={`text-xs font-medium ${pkg.colorCode ? 'text-indigo-100' : 'text-gray-600'}`}>
                                 Inclusief:
                               </p>
-                              <div className="flex flex-wrap gap-1 mt-1">
+                              <div className="flex flex-wrap gap-1.5 mt-1">
                                 {pkg.details.map(detail => (
                                   <span 
                                     key={detail} 
-                                    className={`text-xs px-2 py-1 rounded ${
+                                    className={`text-xs px-2 py-1 rounded-full ${
                                       pkg.colorCode 
                                         ? 'bg-white bg-opacity-20 text-white' 
                                         : 'bg-gray-100 text-gray-700'
@@ -512,16 +604,16 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                             </div>
                           )}
                           {pkg.minPersons && (
-                            <p className={`text-xs mt-2 ${pkg.colorCode ? 'text-yellow-200' : 'text-orange-600'}`}>
+                            <p className={`text-xs mt-2 ${pkg.colorCode ? 'text-yellow-300' : 'text-orange-600 font-medium'}`}>
                               Minimaal {pkg.minPersons} personen
                             </p>
                           )}
                         </div>
-                        <div className="text-right ml-4">
+                        <div className="text-right ml-4 flex-shrink-0">
                           <p className={`text-xl font-bold ${pkg.colorCode ? 'text-white' : 'text-indigo-600'}`}>
-                            €{pkg.price !== undefined ? pkg.price : 'N/A'} {/* Safe access to price */}
+                            {appSettings.currencySymbol}{pkg.price !== undefined ? pkg.price.toFixed(2) : 'N/A'}
                           </p>
-                          <p className={`text-sm ${pkg.colorCode ? 'text-gray-200' : 'text-gray-500'}`}>
+                          <p className={`text-xs ${pkg.colorCode ? 'text-indigo-200' : 'text-gray-500'}`}>
                             per persoon
                           </p>
                         </div>
@@ -532,102 +624,135 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                 {errors.packageId && (
                   <p className="text-red-600 text-sm mt-2">{errors.packageId}</p>
                 )}
+                {errors.guests && (
+                  <p className="text-red-600 text-sm mt-2">{errors.guests}</p>
+                )}
               </div>
             )}
 
             {/* Step 3: Extra Options */}
             {currentStep === 3 && (
               <div>
-                <h3 className="text-xl font-semibold mb-4">Extra Opties</h3>
+                <h3 className="text-xl font-semibold mb-5 text-gray-800">Extra Opties & Korting</h3>
                 
-                {/* Add-ons */}
-                <div className="space-y-4 mb-6">
-                  <h4 className="font-medium text-lg">Toevoegingen</h4>
-                  {specialAddons.map(addon => (
-                    <div key={addon.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="flex-1">
-                        <h5 className="font-medium">{addon.name}</h5>
-                        <p className="text-sm text-gray-600">{addon.description}</p>
-                        <p className="text-xs text-gray-500 mt-1">{addon.timing}</p>
-                        {addon.minPersons && (
-                          <p className="text-xs text-orange-600 mt-1">
-                            Minimaal {addon.minPersons} personen
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center">
-                        <span className="mr-4 font-medium">€{addon.price} p.p.</span>
-                        <input
-                          type="checkbox"
-                          checked={addon.id === 'voorborrel' ? selectedVoorborrel : selectedNaborrel}
-                          onChange={(e) => {
-                            if (addon.id === 'voorborrel') {
-                              setSelectedVoorborrel(e.target.checked);
-                            } else {
-                              setSelectedNaborrel(e.target.checked);
-                            }
-                          }}
-                          disabled={addon.minPersons ? guests < addon.minPersons : false}
-                          className="w-4 h-4 disabled:opacity-50"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  
+                <div className="space-y-5 mb-6">
+                  <h4 className="font-medium text-lg text-gray-700">Arrangement Toevoegingen</h4>
+                  {specialAddons.map(addon => {
+                    const isDisabled = addon.minPersons ? guests < addon.minPersons : false;
+                    return (
+                        <div key={addon.id} className={`flex items-center justify-between p-4 border rounded-lg transition-all ${isDisabled ? 'bg-gray-50 opacity-70' : 'bg-white'}`}>
+                        <div className="flex-1">
+                            <h5 className={`font-medium ${isDisabled ? 'text-gray-500' : 'text-gray-800'}`}>{addon.name}</h5>
+                            <p className={`text-sm ${isDisabled ? 'text-gray-400' : 'text-gray-600'}`}>{addon.description}</p>
+                            <p className={`text-xs ${isDisabled ? 'text-gray-400' : 'text-gray-500'} mt-1`}>{addon.timing}</p>
+                            {addon.minPersons && (
+                            <p className={`text-xs ${isDisabled ? 'text-orange-400' : 'text-orange-600'} mt-1`}>
+                                Minimaal {addon.minPersons} personen (huidig: {guests})
+                            </p>
+                            )}
+                        </div>
+                        <div className="flex items-center ml-4">
+                            <span className={`mr-4 font-medium ${isDisabled ? 'text-gray-500' : 'text-indigo-600'}`}>{appSettings.currencySymbol}{addon.price.toFixed(2)} p.p.</span>
+                            <input
+                            type="checkbox"
+                            checked={addon.id === 'voorborrel' ? selectedVoorborrel : selectedNaborrel}
+                            onChange={(e) => {
+                                if (addon.id === 'voorborrel') setSelectedVoorborrel(e.target.checked);
+                                else setSelectedNaborrel(e.target.checked);
+                            }}
+                            disabled={isDisabled}
+                            className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 disabled:opacity-50 cursor-pointer"
+                            />
+                        </div>
+                        </div>
+                    );
+                  })}
                   {errors.voorborrel && (
                     <p className="text-red-600 text-sm">{errors.voorborrel}</p>
                   )}
                 </div>
 
-                {/* Invoice Section */}
-                <div className="border-t pt-6 mb-6">
-                  <h4 className="font-medium text-lg mb-3">Factuurgegevens</h4>
+                <div className="border-t border-gray-200 pt-6 mb-6">
+                  <h4 className="font-medium text-lg mb-3 text-gray-700">Factuurgegevens (Optioneel)</h4>
                   <div className="flex items-center mb-3">
                     <input
                       type="checkbox"
-                      id="needs-invoice"
-                      checked={invoiceDetails.generateInvoice} // Changed from needsInvoice
-                      onChange={(e) => setInvoiceDetails(prev => ({ ...prev, generateInvoice: e.target.checked }))} // Changed from needsInvoice
-                      className="mr-2"
+                      id="generate-invoice-checkbox"
+                      checked={invoiceDetails.generateInvoice}
+                      onChange={(e) => setInvoiceDetails(prev => ({ ...prev, generateInvoice: e.target.checked }))}
+                      className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 mr-2 cursor-pointer"
                     />
-                    <label htmlFor="needs-invoice" className="text-sm text-gray-700">
-                      Ik heb een factuur nodig voor deze boeking
+                    <label htmlFor="generate-invoice-checkbox" className="text-sm text-gray-700 cursor-pointer">
+                      Ik wil graag een factuur ontvangen voor deze boeking.
                     </label>
                   </div>
 
-                  {invoiceDetails.generateInvoice && ( // Changed from needsInvoice
-                    <div className="space-y-3 pl-6 bg-gray-50 p-4 rounded-lg">
+                  {invoiceDetails.generateInvoice && (
+                    <div className="space-y-3 pl-5 border-l-2 border-indigo-200 ml-1 py-3 bg-gray-50 p-4 rounded-md">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Bedrijfsnaam *
-                        </label>
+                        <label htmlFor="companyNameInput" className="block text-xs font-medium text-gray-600 mb-0.5">Bedrijfsnaam *</label>
                         <input
+                          id="companyNameInput"
                           type="text"
                           value={invoiceDetails.companyName}
                           onChange={(e) => setInvoiceDetails(prev => ({ ...prev, companyName: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full px-3 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                         />
-                        {errors.companyName && <p className="text-red-600 text-sm mt-1">{errors.companyName}</p>}
+                        {errors.companyName && <p className="text-red-500 text-xs mt-1">{errors.companyName}</p>}
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          BTW-nummer (optioneel)
-                        </label>
+                        <label htmlFor="vatNumberInput" className="block text-xs font-medium text-gray-600 mb-0.5">BTW-nummer (optioneel)</label>
                         <input
+                          id="vatNumberInput"
                           type="text"
                           value={invoiceDetails.vatNumber}
                           onChange={(e) => setInvoiceDetails(prev => ({ ...prev, vatNumber: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full px-3 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                         />
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Opmerkingen voor factuur (optioneel)
+                      {/* Checkbox for different invoice address */}
+                      <div className="flex items-center mt-3 mb-2">
+                        <input
+                          type="checkbox"
+                          id="show-different-invoice-address"
+                          checked={showDifferentInvoiceAddress}
+                          onChange={(e) => setShowDifferentInvoiceAddress(e.target.checked)}
+                          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 mr-2 cursor-pointer"
+                        />
+                        <label htmlFor="show-different-invoice-address" className="text-sm text-gray-700 cursor-pointer">
+                          Factuuradres is anders dan het hoofdadres
                         </label>
+                      </div>
+                      {showDifferentInvoiceAddress && (
+                        <div className="space-y-3 pl-5 border-l-2 border-amber-300 ml-1 py-3 bg-amber-50 p-3 rounded-md">
+                          <p className="text-xs text-amber-700 font-medium mb-2">Afwijkend Factuuradres:</p>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-0.5">Straat & Huisnummer *</label>
+                            <div className="flex gap-2">
+                                <input type="text" placeholder="Straatnaam" value={invoiceAddress.street} onChange={(e) => setInvoiceAddress(prev => ({ ...prev, street: e.target.value }))} className="w-2/3 px-3 py-1.5 text-sm border-gray-300 rounded-md" />
+                                <input type="text" placeholder="Nr." value={invoiceAddress.houseNumber} onChange={(e) => setInvoiceAddress(prev => ({ ...prev, houseNumber: e.target.value }))} className="w-1/3 px-3 py-1.5 text-sm border-gray-300 rounded-md" />
+                            </div>
+                            {errors.invoiceStreet && <p className="text-red-500 text-xs mt-1">{errors.invoiceStreet}</p>}
+                            {errors.invoiceHouseNumber && <p className="text-red-500 text-xs mt-1">{errors.invoiceHouseNumber}</p>}
+                          </div>
+                           <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-0.5">Postcode & Plaats *</label>
+                            <div className="flex gap-2">
+                                <input type="text" placeholder="Postcode" value={invoiceAddress.postalCode} onChange={(e) => setInvoiceAddress(prev => ({ ...prev, postalCode: e.target.value }))} className="w-1/3 px-3 py-1.5 text-sm border-gray-300 rounded-md" />
+                                <input type="text" placeholder="Plaats" value={invoiceAddress.city} onChange={(e) => setInvoiceAddress(prev => ({ ...prev, city: e.target.value }))} className="w-2/3 px-3 py-1.5 text-sm border-gray-300 rounded-md" />
+                            </div>
+                            {errors.invoicePostalCode && <p className="text-red-500 text-xs mt-1">{errors.invoicePostalCode}</p>}
+                            {errors.invoiceCity && <p className="text-red-500 text-xs mt-1">{errors.invoiceCity}</p>}
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <label htmlFor="invoiceRemarksInput" className="block text-xs font-medium text-gray-600 mb-0.5">Extra opmerkingen voor factuur (optioneel)</label>
                         <textarea
+                          id="invoiceRemarksInput"
                           value={invoiceDetails.remarks}
                           onChange={(e) => setInvoiceDetails(prev => ({ ...prev, remarks: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full px-3 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
                           rows={2}
                         />
                       </div>
@@ -635,29 +760,28 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
                   )}
                 </div>
 
-                {/* Promo Code Section */}
-                <div className="border-t pt-6">
-                  <h4 className="font-medium text-lg mb-3">Promocode</h4>
-                  <div className="flex gap-2">
+                <div className="border-t border-gray-200 pt-6">
+                  <h4 className="font-medium text-lg mb-3 text-gray-700">Promocode</h4>
+                  <div className="flex items-start gap-2">
                     <input
                       type="text"
                       value={promoCodeInput}
                       onChange={(e) => setPromoCodeInput(e.target.value)}
                       placeholder="Voer uw promocode in"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      disabled={!!appliedPromoCode}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-sm disabled:bg-gray-100"
+                      disabled={!!appliedPromoCode || isApplyingPromoCode}
                     />
                     <button
                       onClick={handleApplyPromoCode}
                       disabled={!promoCodeInput.trim() || isApplyingPromoCode || !!appliedPromoCode}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
                     >
-                      {isApplyingPromoCode ? 'Toepassen...' : 'Toepassen'}
+                      {isApplyingPromoCode ? 'Checken...' : (appliedPromoCode ? 'Toegepast' : 'Toepassen')}
                     </button>
                   </div>
                   {appliedPromoCode && (
                     <p className="text-green-600 text-sm mt-2">
-                      Promocode "{appliedPromoCode}" toegepast! Korting: €{discountAmount.toFixed(2)}
+                      Code "<span className="font-semibold">{appliedPromoCode}</span>" toegepast! Korting: {appSettings.currencySymbol}{discountAmount.toFixed(2)}
                     </p>
                   )}
                 </div>
@@ -667,234 +791,166 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
             {/* Step 4: Merchandise */}
             {currentStep === 4 && (
               <div>
-                <h3 className="text-xl font-semibold mb-4">Merchandise</h3>
-                <div className="space-y-6">
-                  {Object.entries(
-                    merchandiseItems.reduce((acc, item) => {
-                      const category = item.category || 'Overig';
-                      if (!acc[category]) acc[category] = [];
-                      acc[category].push(item);
-                      return acc;
-                    }, {} as Record<string, MerchandiseItem[]>)
-                  ).map(([category, items]) => (
-                    <div key={category}>
-                      <h4 className="font-medium text-lg mb-3 text-indigo-600">{category}</h4>
-                      <div className="grid gap-4">
-                        {items.map(item => (
-                          <div key={item.id} className="flex items-center justify-between p-4 border rounded-lg">
-                            <div className="flex items-center space-x-4">
-                              {item.imageUrl && (
-                                <img 
-                                  src={item.imageUrl} 
-                                  alt={item.name}
-                                  className="w-16 h-16 object-cover rounded-md"
-                                  onError={(e) => {
-                                    const target = e.target as HTMLImageElement;
-                                    target.style.display = 'none';
-                                  }}
+                <h3 className="text-xl font-semibold mb-5 text-gray-800">Merchandise (Optioneel)</h3>
+                {merchandiseItems.length > 0 ? (
+                    <div className="space-y-6">
+                    {Object.entries(
+                        merchandiseItems.reduce((acc, item) => {
+                        const category = item.category || 'Overig';
+                        if (!acc[category]) acc[category] = [];
+                        acc[category].push(item);
+                        return acc;
+                        }, {} as Record<string, MerchandiseItem[]>)
+                    ).map(([category, items]) => (
+                        <div key={category}>
+                        <h4 className="font-medium text-base mb-3 text-indigo-600 border-b border-indigo-200 pb-1.5">{category}</h4>
+                        <div className="grid grid-cols-1 gap-4">
+                            {items.map(item => (
+                            <div key={item.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 border border-gray-200 rounded-lg bg-white shadow-sm">
+                                <div className="flex items-center space-x-3 mb-3 sm:mb-0">
+                                {item.imageUrl && (
+                                    <img 
+                                    src={item.imageUrl} 
+                                    alt={item.name}
+                                    className="w-16 h-16 object-cover rounded-md border border-gray-200"
+                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                    />
+                                )}
+                                <div className="flex-1">
+                                    <h5 className="font-medium text-gray-800">{item.name}</h5>
+                                    <p className="text-xs text-gray-500 line-clamp-2">{item.description}</p>
+                                    <p className="text-sm font-semibold text-indigo-600 mt-0.5">{appSettings.currencySymbol}{item.priceInclVAT.toFixed(2)}</p>
+                                </div>
+                                </div>
+                                <div className="flex items-center self-end sm:self-center">
+                                <label htmlFor={`merch-${item.id}`} className="mr-2 text-xs text-gray-600">Aantal:</label>
+                                <input
+                                    id={`merch-${item.id}`}
+                                    type="number"
+                                    min="0"
+                                    max="20" // Sensible max
+                                    value={merchandise.find(m => m.itemId === item.id)?.quantity || 0}
+                                    onChange={(e) => handleMerchandiseQuantityChange(item.id, parseInt(e.target.value) || 0)}
+                                    className="w-16 px-2 py-1 border border-gray-300 rounded-md text-center text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
                                 />
-                              )}
-                              <div>
-                                <h5 className="font-medium">{item.name}</h5>
-                                <p className="text-sm text-gray-600">{item.description}</p>
-                                <p className="text-lg font-bold text-indigo-600">€{item.priceInclVAT.toFixed(2)}</p>
-                              </div>
+                                </div>
                             </div>
-                            <div className="flex items-center">
-                              <label className="mr-2 text-sm">Aantal:</label>
-                              <input
-                                type="number"
-                                min="0"
-                                max="10"
-                                value={merchandise.find(m => m.itemId === item.id)?.quantity || 0}
-                                onChange={(e) => handleMerchandiseQuantityChange(item.id, parseInt(e.target.value) || 0)}
-                                className="w-16 px-2 py-1 border border-gray-300 rounded-md text-center"
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                            ))}
+                        </div>
+                        </div>
+                    ))}
                     </div>
-                  ))}
-                  
-                  {merchandiseItems.length === 0 && (
-                    <p className="text-gray-500 text-center py-8">
-                      Momenteel geen merchandise beschikbaar.
+                ) : (
+                    <p className="text-gray-500 text-center py-10">
+                        Momenteel is er geen merchandise beschikbaar.
                     </p>
-                  )}
-                </div>
+                )}
               </div>
             )}
 
             {/* Step 5: Personal Information */}
             {currentStep === 5 && (
               <div>
-                <h3 className="text-xl font-semibold mb-4">Persoonlijke Gegevens</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Naam *</label>
-                    <input
-                      type="text"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {errors.name && <p className="text-red-600 text-sm mt-1">{errors.name}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">E-mail *</label>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {errors.email && <p className="text-red-600 text-sm mt-1">{errors.email}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Telefoon *</label>
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {errors.phone && <p className="text-red-600 text-sm mt-1">{errors.phone}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Aantal gasten *
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={guests}
-                      onChange={(e) => setGuests(parseInt(e.target.value) || 1)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {errors.guests && <p className="text-red-600 text-sm mt-1">{errors.guests}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Straat *</label>
-                    <input
-                      type="text"
-                      value={address.street}
-                      onChange={(e) => setAddress(prev => ({ ...prev, street: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {errors.street && <p className="text-red-600 text-sm mt-1">{errors.street}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Huisnummer *</label>
-                    <input
-                      type="text"
-                      value={address.houseNumber}
-                      onChange={(e) => setAddress(prev => ({ ...prev, houseNumber: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {errors.houseNumber && <p className="text-red-600 text-sm mt-1">{errors.houseNumber}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Postcode *</label>
-                    <input
-                      type="text"
-                      value={address.postalCode}
-                      onChange={(e) => setAddress(prev => ({ ...prev, postalCode: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {errors.postalCode && <p className="text-red-600 text-sm mt-1">{errors.postalCode}</p>}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Plaats *</label>
-                    <input
-                      type="text"
-                      value={address.city}
-                      onChange={(e) => setAddress(prev => ({ ...prev, city: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {errors.city && <p className="text-red-600 text-sm mt-1">{errors.city}</p>}
-                  </div>
+                <h3 className="text-xl font-semibold mb-5 text-gray-800">Uw Gegevens</h3>
+                
+                <div className="bg-blue-50 p-4 rounded-md mb-5 border border-blue-200">
+                    <p className="text-sm text-blue-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-1.5 -mt-0.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                        Deze gegevens worden gebruikt voor uw reservering en eventuele communicatie hierover.
+                    </p>
                 </div>
 
-                {/* Optional fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4">
+                  <div>
+                    <label htmlFor="nameInput" className="block text-sm font-medium text-gray-700 mb-1">Volledige Naam *</label>
+                    <input id="nameInput" type="text" value={name} onChange={(e) => setName(e.target.value)} className={`w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 ${errors.name ? 'border-red-500 ring-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'}`} />
+                    {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
+                  </div>
+
+                  <div>
+                    <label htmlFor="emailInput" className="block text-sm font-medium text-gray-700 mb-1">E-mailadres *</label>
+                    <input id="emailInput" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={`w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 ${errors.email ? 'border-red-500 ring-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'}`} />
+                    {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+                  </div>
+
+                  <div>
+                    <label htmlFor="phoneInput" className="block text-sm font-medium text-gray-700 mb-1">Telefoonnummer *</label>
+                    <input id="phoneInput" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className={`w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 ${errors.phone ? 'border-red-500 ring-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'}`} />
+                    {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
+                  </div>
+
+                  <div>
+                    <label htmlFor="guestsInput" className="block text-sm font-medium text-gray-700 mb-1">Aantal gasten *</label>
+                    <input id="guestsInput" type="number" min="1" max={selectedShowSlot ? selectedShowSlot.capacity - selectedShowSlot.bookedCount : 100} value={guests} onChange={(e) => setGuests(Math.max(1, parseInt(e.target.value) || 1))} className={`w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 ${errors.guests ? 'border-red-500 ring-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'}`} />
+                    {errors.guests && <p className="text-red-500 text-xs mt-1">{errors.guests}</p>}
+                  </div>
+                  
+                  <div className="md:col-span-2 mt-3">
+                    <p className="text-sm font-medium text-gray-700 mb-1">Adresgegevens *</p>
+                  </div>
+
+                  <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-x-5 gap-y-4">
+                    <div className="sm:col-span-2">
+                        <label htmlFor="streetInput" className="block text-xs font-medium text-gray-600 mb-0.5">Straat *</label>
+                        <input id="streetInput" type="text" value={address.street} onChange={(e) => setAddress(prev => ({ ...prev, street: e.target.value }))} className={`w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 ${errors.street ? 'border-red-500 ring-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'}`} />
+                        {errors.street && <p className="text-red-500 text-xs mt-1">{errors.street}</p>}
+                    </div>
+                    <div>
+                        <label htmlFor="houseNumberInput" className="block text-xs font-medium text-gray-600 mb-0.5">Huisnummer *</label>
+                        <input id="houseNumberInput" type="text" value={address.houseNumber} onChange={(e) => setAddress(prev => ({ ...prev, houseNumber: e.target.value }))} className={`w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 ${errors.houseNumber ? 'border-red-500 ring-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'}`} />
+                        {errors.houseNumber && <p className="text-red-500 text-xs mt-1">{errors.houseNumber}</p>}
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-x-5 gap-y-4">
+                    <div>
+                        <label htmlFor="postalCodeInput" className="block text-xs font-medium text-gray-600 mb-0.5">Postcode *</label>
+                        <input id="postalCodeInput" type="text" value={address.postalCode} onChange={(e) => setAddress(prev => ({ ...prev, postalCode: e.target.value }))} className={`w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 ${errors.postalCode ? 'border-red-500 ring-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'}`} />
+                        {errors.postalCode && <p className="text-red-500 text-xs mt-1">{errors.postalCode}</p>}
+                    </div>
+                    <div className="sm:col-span-2">
+                        <label htmlFor="cityInput" className="block text-xs font-medium text-gray-600 mb-0.5">Plaats *</label>
+                        <input id="cityInput" type="text" value={address.city} onChange={(e) => setAddress(prev => ({ ...prev, city: e.target.value }))} className={`w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-1 ${errors.city ? 'border-red-500 ring-red-500' : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'}`} />
+                        {errors.city && <p className="text-red-500 text-xs mt-1">{errors.city}</p>}
+                    </div>
+                  </div>
+                  {errors.address && <p className="text-red-500 text-xs mt-1 md:col-span-2">{errors.address}</p>} 
+                </div>
+
                 <div className="mt-6 space-y-4">
+                  <h4 className="text-base font-medium text-gray-700 mb-2">Aanvullende Informatie (Optioneel)</h4>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Viering details (optioneel)
-                    </label>
-                    <textarea
-                      value={celebrationDetails}
-                      onChange={(e) => setCelebrationDetails(e.target.value)}
-                      placeholder="Vertel ons over de speciale gelegenheid die u viert..."
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      rows={2}
-                    />
+                    <label htmlFor="celebrationDetailsInput" className="block text-sm font-medium text-gray-700 mb-1">Viering details</label>
+                    <textarea id="celebrationDetailsInput" value={celebrationDetails} onChange={(e) => setCelebrationDetails(e.target.value)} placeholder="Bijv. verjaardag, jubileum, etc."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" rows={2} />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Dieetwensen (optioneel)
-                    </label>
-                    <textarea
-                      value={dietaryWishes}
-                      onChange={(e) => setDietaryWishes(e.target.value)}
-                      placeholder="Heeft u speciale dieetwensen of allergieën?"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      rows={2}
-                    />
+                    <label htmlFor="dietaryWishesInput" className="block text-sm font-medium text-gray-700 mb-1">Dieetwensen / Allergieën</label>
+                    <textarea id="dietaryWishesInput" value={dietaryWishes} onChange={(e) => setDietaryWishes(e.target.value)} placeholder="Bijv. vegetarisch, glutenvrij, notenallergie..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" rows={2} />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Plaatsingsvoorkeur (optioneel)
-                    </label>
-                    <textarea
-                      value={placementPreferenceDetails}
-                      onChange={(e) => setPlacementPreferenceDetails(e.target.value)}
-                      placeholder="Heeft u speciale wensen voor de plaatsing (bijv. dichtbij het podium, toegankelijk)?"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      rows={2}
-                    />
+                    <label htmlFor="placementPreferenceDetailsInput" className="block text-sm font-medium text-gray-700 mb-1">Plaatsingsvoorkeur</label>
+                    <textarea id="placementPreferenceDetailsInput" value={placementPreferenceDetails} onChange={(e) => setPlacementPreferenceDetails(e.target.value)} placeholder="Bijv. bij het raam, rustige plek..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" rows={2} />
                   </div>
                 </div>
 
-                {/* Privacy Section */}
-                <div className="border-t pt-6 mt-6">
-                  <h4 className="font-medium mb-3">Privacy & Marketing</h4>
+                <div className="border-t border-gray-200 pt-6 mt-6">
+                  <h4 className="text-base font-medium text-gray-700 mb-3">Privacy & Marketing</h4>
                   <div className="space-y-3">
                     <div className="flex items-start">
-                      <input
-                        type="checkbox"
-                        id="privacy-agreement"
-                        checked={agreedToPrivacyPolicy}
-                        onChange={(e) => setAgreedToPrivacyPolicy(e.target.checked)}
-                        className="mt-1 mr-3"
-                      />
-                      <label htmlFor="privacy-agreement" className="text-sm text-gray-700">
-                        Ik ga akkoord met het privacybeleid en de algemene voorwaarden *
+                      <input type="checkbox" id="privacy-agreement" checked={agreedToPrivacyPolicy} onChange={(e) => setAgreedToPrivacyPolicy(e.target.checked)} className="mt-0.5 mr-2.5 h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer" />
+                      <label htmlFor="privacy-agreement" className="text-sm text-gray-700 cursor-pointer">
+                        Ik ga akkoord met het <a href="/privacy" target="_blank" className="text-indigo-600 hover:underline">privacybeleid</a> en de <a href="/terms" target="_blank" className="text-indigo-600 hover:underline">algemene voorwaarden</a>. *
                       </label>
                     </div>
-                    {errors.agreedToPrivacyPolicy && (
-                      <p className="text-red-600 text-sm">{errors.agreedToPrivacyPolicy}</p>
-                    )}
+                    {errors.agreedToPrivacyPolicy && <p className="text-red-500 text-xs ml-6">{errors.agreedToPrivacyPolicy}</p>}
 
                     <div className="flex items-start">
-                      <input
-                        type="checkbox"
-                        id="marketing-emails"
-                        checked={acceptsMarketingEmails}
-                        onChange={(e) => setAcceptsMarketingEmails(e.target.checked)}
-                        className="mt-1 mr-3"
-                      />
-                      <label htmlFor="marketing-emails" className="text-sm text-gray-700">
-                        Ik wil graag nieuwsbrieven en marketing e-mails ontvangen
+                      <input type="checkbox" id="marketing-emails" checked={acceptsMarketingEmails} onChange={(e) => setAcceptsMarketingEmails(e.target.checked)} className="mt-0.5 mr-2.5 h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer" />
+                      <label htmlFor="marketing-emails" className="text-sm text-gray-700 cursor-pointer">
+                        Ja, ik wil graag nieuwsbrieven en speciale aanbiedingen ontvangen.
                       </label>
                     </div>
                   </div>
@@ -905,135 +961,125 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
             {/* Step 6: Overview & Confirmation */}
             {currentStep === 6 && (
               <div>
-                <h3 className="text-xl font-semibold mb-4">Overzicht & Bevestiging</h3>
+                <h3 className="text-xl font-semibold mb-5 text-gray-800">Overzicht & Bevestiging</h3>
                 
-                {/* Personal Information Summary */}
-                <div className="bg-gray-50 p-4 rounded-lg mb-4">
-                  <h4 className="font-semibold mb-2">Persoonlijke Gegevens</h4>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="bg-gray-50 p-4 rounded-lg mb-4 border border-gray-200">
+                  <h4 className="font-semibold text-gray-700 mb-2">Persoonlijke Gegevens</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600">
                     <div><strong>Naam:</strong> {name}</div>
                     <div><strong>E-mail:</strong> {email}</div>
                     <div><strong>Telefoon:</strong> {phone}</div>
-                    <div><strong>Gasten:</strong> {guests}</div>
-                    <div className="col-span-2">
-                      <strong>Adres:</strong> {address.street} {address.houseNumber}, {address.postalCode} {address.city}
-                    </div>
+                    <div><strong>Aantal Gasten:</strong> {guests}</div>
+                    <div className="sm:col-span-2"><strong>Adres:</strong> {address.street} {address.houseNumber}, {address.postalCode} {address.city}</div>
                   </div>
                 </div>
 
-                {/* Additional Details */}
                 {(celebrationDetails || dietaryWishes || placementPreferenceDetails || invoiceDetails.generateInvoice) && (
-                  <div className="bg-yellow-50 p-4 rounded-lg mb-4">
-                    <h5 className="font-medium mb-2">Aanvullende informatie:</h5>
-                    {celebrationDetails && (
-                      <div className="text-sm mb-2">
-                        <span className="font-medium">Viering:</span> {celebrationDetails}
-                      </div>
-                    )}
-                    {dietaryWishes && (
-                      <div className="text-sm mb-2">
-                        <span className="font-medium">Dieetwensen:</span> {dietaryWishes}
-                      </div>
-                    )}
-                    {placementPreferenceDetails && (
-                      <div className="text-sm mb-2">
-                        <span className="font-medium">Plaatsingsvoorkeur:</span> {placementPreferenceDetails}
-                      </div>
-                    )}
-                    {invoiceDetails.generateInvoice && ( // Changed from needsInvoice
-                      <div className="text-sm">
-                        <span className="font-medium">Factuur:</span> Ja, voor {invoiceDetails.companyName}
-                      </div>
-                    )}
+                  <div className="bg-yellow-50 p-4 rounded-lg mb-4 border border-yellow-200">
+                    <h5 className="font-semibold text-yellow-800 mb-2">Aanvullende Informatie</h5>
+                    <div className="space-y-1 text-sm text-yellow-700">
+                        {celebrationDetails && <div><strong>Viering:</strong> {celebrationDetails}</div>}
+                        {dietaryWishes && <div><strong>Dieetwensen:</strong> {dietaryWishes}</div>}
+                        {placementPreferenceDetails && <div><strong>Plaatsingsvoorkeur:</strong> {placementPreferenceDetails}</div>}
+                        {invoiceDetails.generateInvoice && (
+                            <div>
+                                <strong>Factuur:</strong> Ja, voor {invoiceDetails.companyName}
+                                {showDifferentInvoiceAddress && invoiceDetails.address && (
+                                    <span className="block pl-4 text-xs">Factuuradres: {invoiceDetails.address.street} {invoiceDetails.address.houseNumber}, {invoiceDetails.address.postalCode} {invoiceDetails.address.city}</span>
+                                )}
+                            </div>
+                        )}
+                    </div>
                   </div>
                 )}
 
-                {/* Confirmation Notice */}
                 <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-                  <h5 className="font-medium text-blue-800 mb-2">Let op:</h5>
-                  <ul className="text-sm text-blue-700 space-y-1">
-                    <li>• Na bevestiging ontvangt u een e-mail met alle details</li>
-                    <li>• Betaling kan ter plaatse of via factuur (indien aangevraagd)</li>
-                    <li>• Voor wijzigingen kunt u contact opnemen via info@inspirationpoint.nl</li>
-                    <li>• Annulering is mogelijk tot 48 uur voor de voorstelling</li>
+                  <h5 className="font-semibold text-blue-800 mb-2">Belangrijk:</h5>
+                  <ul className="text-sm text-blue-700 space-y-1 list-disc list-inside">
+                    <li>Na bevestiging ontvangt u een e-mail met alle details van uw reservering.</li>
+                    <li>Betaling vindt plaats conform de voorwaarden (ter plaatse of via factuur indien aangevraagd en goedgekeurd).</li>
+                    <li>Voor wijzigingen of annuleringen, neem tijdig contact op. Annuleringsvoorwaarden zijn van toepassing.</li>
                   </ul>
                 </div>
 
                 {errors.final && (
-                  <p className="text-red-600 text-sm mt-2">{errors.final}</p>
+                  <p className="text-red-600 text-sm mt-3">{errors.final}</p>
                 )}
               </div>
             )}
           </div>
 
           {/* Right Panel - Summary */}
-          <div className="w-80 bg-gray-50 p-6 border-l">
-            <div className="bg-indigo-50 p-4 rounded-lg mb-4">
-              <h4 className="font-semibold mb-2 text-indigo-800">Reservering Overzicht</h4>
-              <div className="space-y-1 text-sm">
-                {selectedShowSlot && (
+          <div className="w-full md:w-80 lg:w-96 bg-slate-50 p-5 border-t md:border-t-0 md:border-l border-gray-200 flex flex-col">
+            <div className="sticky top-5">
+              <h4 className="text-lg font-semibold mb-3 text-slate-800">Reservering Overzicht</h4>
+              <div className="space-y-1.5 text-sm text-slate-700">
+                {selectedShowSlot ? (
                   <div className="flex justify-between">
                     <span>Show:</span>
-                    <span className="font-medium">{selectedShowSlot.date} om {selectedShowSlot.time}</span>
+                    <span className="font-medium text-right">{selectedShowSlot.date} <br className="sm:hidden"/>om {selectedShowSlot.time}</span>
                   </div>
+                ) : (
+                  <p className="text-slate-500 italic">Selecteer een show...</p>
                 )}
-                {selectedPackageId && (
+                
+                {selectedPackage ? (
                   <div className="flex justify-between">
                     <span>Arrangement:</span>
-                    <span className="font-medium">{showPackages.find(p => p.id === selectedPackageId)?.name}</span> {/* Changed from allPackages */}
+                    <span className="font-medium text-right">{selectedPackage.name}</span>
                   </div>
+                ) : (
+                    selectedShowSlotId && <p className="text-slate-500 italic">Selecteer een arrangement...</p>
                 )}
+
                 <div className="flex justify-between">
                   <span>Aantal gasten:</span>
                   <span className="font-medium">{guests}</span>
                 </div>
-                {selectedPackageId && (
+
+                {selectedPackage && selectedPackage.price !== undefined && (
                   <div className="flex justify-between">
-                    <span>Arrangementsprijs:</span>
-                    <span>€{((showPackages.find(p => p.id === selectedPackageId)?.price || 0) * guests).toFixed(2)}</span> {/* Changed from allPackages and safe access*/}
+                    <span>Arrangement totaal:</span>
+                    <span>{appSettings.currencySymbol}{(selectedPackage.price * guests).toFixed(2)}</span>
                   </div>
                 )}
                 
-                {selectedVoorborrel && (
+                {selectedVoorborrel && specialAddons.find(a => a.id === 'voorborrel') && (
                   <div className="flex justify-between">
                     <span>Borrel Vooraf:</span>
-                    <span>€{((specialAddons.find(a => a.id === 'voorborrel')?.price || 15) * guests).toFixed(2)}</span>
+                    <span>{appSettings.currencySymbol}{((specialAddons.find((a: SpecialAddOn) => a.id === 'voorborrel')?.price || 0) * guests).toFixed(2)}</span>
                   </div>
                 )}
-                {selectedNaborrel && (
+                {selectedNaborrel && specialAddons.find(a => a.id === 'naborrel') && (
                   <div className="flex justify-between">
                     <span>Borrel Naderhand:</span>
-                    <span>€{((specialAddons.find(a => a.id === 'naborrel')?.price || 15) * guests).toFixed(2)}</span>
+                    <span>{appSettings.currencySymbol}{((specialAddons.find((a: SpecialAddOn) => a.id === 'naborrel')?.price || 0) * guests).toFixed(2)}</span>
                   </div>
                 )}
                 
                 {merchandise.length > 0 && (
                   <>
-                    <div className="text-xs text-gray-600 mt-2 mb-1">Merchandise:</div>
+                    <div className="text-xs text-slate-500 pt-1.5 mt-1.5 border-t border-slate-200">Merchandise:</div>
                     {merchandise.map(item => (
-                      <div key={item.itemId} className="flex justify-between text-xs">
-                        <span>{item.itemName} ({item.quantity}x):</span>
-                        <span>€{(item.itemPrice * item.quantity).toFixed(2)}</span>
+                      item.quantity > 0 && <div key={item.itemId} className="flex justify-between text-xs">
+                        <span className="truncate max-w-[150px]">{item.itemName} ({item.quantity}x)</span>
+                        <span>{appSettings.currencySymbol}{(item.itemPrice * item.quantity).toFixed(2)}</span>
                       </div>
                     ))}
                   </>
                 )}
                 
-                {selectedPackageId && (
-                  <div className="border-t pt-2 mt-2">
-                    <div className="flex justify-between">
-                      <span>Subtotaal:</span>
-                      <span>€{calculateSubtotal().toFixed(2)}</span>
-                    </div>
+                {(selectedPackage || merchandise.length > 0 || selectedVoorborrel || selectedNaborrel) && (
+                  <div className="border-t border-slate-300 pt-2.5 mt-2.5">
                     {discountAmount > 0 && (
-                      <div className="flex justify-between text-green-600">
+                      <div className="flex justify-between text-green-600 font-medium">
                         <span>Korting ({appliedPromoCode}):</span>
-                        <span>-€{discountAmount.toFixed(2)}</span>
+                        <span>-{appSettings.currencySymbol}{discountAmount.toFixed(2)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between font-semibold text-lg text-indigo-600">
-                      <span>Totaal te betalen:</span>
-                      <span>€{calculateTotalPrice().toFixed(2)}</span>
+                    <div className="flex justify-between font-semibold text-lg text-indigo-700 mt-1">
+                      <span>Totaal:</span>
+                      <span>{appSettings.currencySymbol}{currentTotalPrice.toFixed(2)}</span>
                     </div>
                   </div>
                 )}
@@ -1043,21 +1089,23 @@ export const BookingStepper: React.FC<BookingStepperProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="bg-gray-50 px-6 py-4 flex justify-between">
+        <div className="bg-slate-50 px-5 py-3.5 border-t border-gray-200 flex justify-between items-center rounded-b-lg">
           <button
             onClick={prevStep}
             disabled={currentStep === 1}
-            className="px-4 py-2 text-gray-600 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded-md hover:bg-gray-100"
           >
             Vorige
           </button>
           <button
             onClick={nextStep}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            disabled={!isStepValid} // Controlled by validation
+            className="px-6 py-2.5 text-sm font-semibold bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-150 ease-in-out shadow-sm hover:shadow-md"
           >
-            {currentStep === STEPS.length ? 'Bevestigen' : 'Volgende'}
+            {currentStep === STEPS.length ? 'Boeking Bevestigen' : 'Volgende'}
           </button>
         </div>
       </div>
-    </div>  );
+    </div>
+  );
 };

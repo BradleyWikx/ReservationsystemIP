@@ -1,17 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ReservationDetails, PackageOption, MerchandiseItem, ShowSlot, Address, InvoiceDetails, AppSettings } from '../../types'; // Removed SpecialAddOn, PromoCode as they are not directly used or handled by props
+import { ReservationDetails, PackageOption, MerchandiseItem, ShowSlot, Address, InvoiceDetails, AppSettings, Customer, SpecialAddOn, PromoCode } from '../../types';
 import { Timestamp } from 'firebase/firestore';
-import { calculatePrice } from '../../utils/pricingUtils'; // Corrected import: calculatePrice
+import { calculatePrice } from '../../utils/pricingUtils'; 
 
-interface EditBookingModalProps {
+export interface EditBookingModalProps {
   isOpen: boolean;
   onClose: () => void;
   booking: ReservationDetails | null;
-  onSave: (updatedBooking: ReservationDetails) => void;
+  onSave: (updatedBooking: ReservationDetails, originalShowSlotId?: string) => void; // Modified to include originalShowSlotId
   packages: PackageOption[];
   merchandiseItems: MerchandiseItem[];
   showSlots: ShowSlot[];
-  appSettings?: AppSettings; // Make appSettings optional as it's not used everywhere yet
+  appSettings?: AppSettings; 
+  customers?: Customer[]; // Added customers
+  onUpdateCustomer?: (updatedCustomer: Customer) => Promise<boolean>; // Added onUpdateCustomer
+  specialAddons?: SpecialAddOn[]; // Added specialAddons
+  applyPromoCode?: (codeString: string, currentBookingSubtotal: number) => { success: boolean; discountAmount?: number; message: string; appliedCodeObject?: PromoCode }; // Added applyPromoCode
 }
 
 const initialAddressState: Address = { street: '', houseNumber: '', postalCode: '', city: '', zipCode: '', country: '' };
@@ -54,13 +58,21 @@ export const EditBookingModal: React.FC<EditBookingModalProps> = ({
   merchandiseItems,
   showSlots,
   // appSettings, // Not directly used in this simplified version yet
+  // customers, // Not directly used yet
+  // onUpdateCustomer, // Not directly used yet
+  // specialAddons, // Not directly used yet
+  // applyPromoCode, // Not directly used yet
 }) => {
   const [formData, setFormData] = useState<Partial<ReservationDetails>>(getInitialFormData(booking));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [calculatedPrice, setCalculatedPrice] = useState<number>(0);
+  const [originalShowSlotId, setOriginalShowSlotId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     setFormData(getInitialFormData(booking));
+    if (booking) {
+      setOriginalShowSlotId(booking.showSlotId); // Store the initial showSlotId
+    }
   }, [booking]);
 
   const validate = useCallback(() => {
@@ -106,7 +118,7 @@ export const EditBookingModal: React.FC<EditBookingModalProps> = ({
     setCalculatedPrice(currentPrice);
     setFormData(prev => ({ ...prev, totalPrice: currentPrice }));
 
-  }, [formData.packageId, formData.showSlotId, formData.guests, formData.merchandise, packages, merchandiseItems, formData.appliedPromoCode, formData.discountAmount]);
+  }, [formData.packageId, formData.showSlotId, formData.guests, formData.merchandise, packages, merchandiseItems, formData.appliedPromoCode, formData.discountAmount, showSlots]); // Added showSlots to dependency array
 
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -149,7 +161,7 @@ export const EditBookingModal: React.FC<EditBookingModalProps> = ({
   };
   
   const handleInvoiceDetailsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value, type } = e.target;
+    const { name, value } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
 
     if (name === 'generateInvoice' || name === 'sendInvoice') {
@@ -217,7 +229,6 @@ export const EditBookingModal: React.FC<EditBookingModalProps> = ({
       reservationId: booking!.reservationId, // Ensure original reservationId is preserved
       lastModifiedTimestamp: Timestamp.now().toDate().toISOString(),
       totalPrice: calculatedPrice, // Use the dynamically calculated price
-      // Ensure all required fields from ReservationDetails are present
       packageName: packages.find(p => p.id === formData.packageId)?.name || booking!.packageName,
       date: showSlots.find(s => s.id === formData.showSlotId)?.date || booking!.date,
       time: showSlots.find(s => s.id === formData.showSlotId)?.time || booking!.time,
@@ -226,7 +237,9 @@ export const EditBookingModal: React.FC<EditBookingModalProps> = ({
       agreedToPrivacyPolicy: formData.agreedToPrivacyPolicy === undefined ? booking!.agreedToPrivacyPolicy : formData.agreedToPrivacyPolicy,
     };
     
-    onSave(submissionData);
+    // Pass originalShowSlotId if it has changed
+    const hasShowSlotChanged = originalShowSlotId !== submissionData.showSlotId;
+    onSave(submissionData, hasShowSlotChanged ? originalShowSlotId : undefined);
     onClose();
   };
 
